@@ -1,0 +1,13 @@
+node_modules/
+out/
+dist/
+release/
+*.log
+.DS_Store
+.vite/
+.eslintcache
+
+# Local overrides. Real config lives in the app's userData directory, not the repo —
+# nothing here should ever hold a token or a private key.
+.env
+.env.local
