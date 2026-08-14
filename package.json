@@ -11,7 +11,9 @@
     "build": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "verify": "esbuild src/main/amber/connection.ts --bundle --platform=node --format=esm --external:ws --outfile=out/verify/connection.mjs && node scripts/verify-connection.mjs"
+    "verify": "npm run verify:connection && npm run verify:install",
+    "verify:connection": "esbuild src/main/amber/connection.ts --bundle --platform=node --format=esm --external:ws --outfile=out/verify/connection.mjs && node scripts/verify-connection.mjs",
+    "verify:install": "esbuild src/main/ssh/authorized-keys.ts --bundle --platform=node --format=esm --outfile=out/verify/authorized-keys.mjs && node scripts/verify-install-command.mjs"
   },
   "dependencies": {
     "ssh2": "^1.16.0",

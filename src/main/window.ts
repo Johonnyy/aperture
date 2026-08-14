@@ -33,9 +33,22 @@ export function createWindow(): BrowserWindow {
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void window.loadURL(process.env.ELECTRON_RENDERER_URL)
+    // In dev, a renderer failure is otherwise silent: the window keeps showing the
+    // last good paint while nothing responds. Open DevTools so the console is
+    // already there when that happens.
+    window.webContents.openDevTools({ mode: 'detach' })
   } else {
     void window.loadFile(join(__dirname, '../renderer/index.html'))
   }
+
+  // Surface renderer crashes and blocked resources in the main-process log rather
+  // than letting them disappear into a console nobody has open.
+  window.webContents.on('render-process-gone', (_e, details) => {
+    console.error('[renderer gone]', details.reason, details.exitCode)
+  })
+  window.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+    if (level >= 2) console.error(`[renderer] ${message} (${sourceId}:${line})`)
+  })
 
   return window
 }

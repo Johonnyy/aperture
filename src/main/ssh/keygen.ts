@@ -18,23 +18,6 @@ export function generateKey(label: string, comment = 'aperture'): KeyRecord {
   return storeKey(label, pair.public.trim(), pair.private)
 }
 
-/**
- * The remote half of `ssh-copy-id`.
- *
- * Appends the public key to `~/.ssh/authorized_keys` with the permissions sshd
- * insists on — a group-writable `~/.ssh` makes sshd silently ignore the file, which
- * presents as "the key didn't work" with no useful error anywhere.
- *
- * The key is passed through a quoted heredoc so nothing in it is shell-expanded,
- * and `grep -qxF` makes re-running harmless instead of accumulating duplicates.
- */
-export function buildInstallCommand(publicKey: string): string {
-  const key = publicKey.trim()
-  return [
-    'mkdir -p ~/.ssh',
-    'chmod 700 ~/.ssh',
-    'touch ~/.ssh/authorized_keys',
-    'chmod 600 ~/.ssh/authorized_keys',
-    `grep -qxF '${key.replace(/'/g, "'\\''")}' ~/.ssh/authorized_keys || cat >> ~/.ssh/authorized_keys <<'APERTURE_EOF'\n${key}\nAPERTURE_EOF`,
-  ].join(' && ')
-}
+// The remote half of `ssh-copy-id` lives in `authorized-keys.ts`, kept free of
+// Electron imports so it can be exercised against a real shell in the verify script.
+export { buildInstallCommand, INSTALL_OK_MARKER } from './authorized-keys'

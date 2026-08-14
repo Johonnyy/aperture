@@ -82,6 +82,13 @@ export function SettingsView(): React.JSX.Element {
       />
 
       <Toggle
+        label="Verbose logging"
+        hint="Include exact commands, raw output, and host key fingerprints in operation logs. Turn it off to see only the high-level steps."
+        checked={draft.verboseLogging}
+        onChange={(verboseLogging) => setDraft({ ...draft, verboseLogging })}
+      />
+
+      <Toggle
         label="Confirm before running commands"
         hint="Amber-initiated SSH commands wait for your approval in the status panel. Leave this on until you trust the pattern."
         checked={draft.confirmBeforeExec}

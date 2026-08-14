@@ -22,9 +22,11 @@ import {
   updateServer,
   updateSettings,
 } from './config'
+import { installKey } from './ssh/install'
 import { deleteKey, isVaultAvailable, listKeys } from './ssh/key-store'
-import { buildInstallCommand, generateKey } from './ssh/keygen'
+import { generateKey } from './ssh/keygen'
 import * as ssh from './ssh/ssh-client'
+import type { Log } from './ssh/ssh-client'
 
 export interface IpcContext {
   amber: AmberConnection
@@ -36,7 +38,7 @@ export interface IpcContext {
  * Every `ipcMain` registration lives here, so the privileged surface the renderer
  * can reach is one file you can read top to bottom.
  */
-export function registerIpc({ amber, bridge }: IpcContext): void {
+export function registerIpc({ amber, bridge, emit }: IpcContext): void {
   // --- amber ----------------------------------------------------------------
 
   ipcMain.handle(IPC.AMBER_CONNECT, (): ConnectionStatus => {
@@ -118,54 +120,46 @@ export function registerIpc({ amber, bridge }: IpcContext): void {
   )
 
   /**
-   * The install flow: authenticate once with a password, append our public key to
-   * the remote `authorized_keys`, then verify by opening a *fresh* key-only
-   * connection before switching the stored credential over. A half-installed key
-   * that silently falls back to a password is worse than a clean failure.
+   * The install flow, narrated. Every step is pushed to the renderer as it happens
+   * under a caller-supplied `opId`, so the UI can show what the connection is
+   * actually doing instead of an opaque spinner.
    */
   ipcMain.handle(
     IPC.SSH_INSTALL_KEY,
     async (
       _e,
+      opId: string,
       serverId: string,
       keyId: string,
       password: string,
     ): Promise<{ ok: boolean; error?: string }> => {
-      const server = getServer(serverId)
-      if (!server) return { ok: false, error: 'Unknown server.' }
-
-      const publicKey = listKeys().find((k) => k.id === keyId)?.publicKey
-      if (!publicKey) return { ok: false, error: 'Unknown key.' }
-
-      try {
-        const client = await ssh.connect(server, { password, trustOnFirstUse: true })
-        await new Promise<void>((resolve, reject) => {
-          client.exec(buildInstallCommand(publicKey), (err, stream) => {
-            if (err) return reject(err)
-            let stderr = ''
-            stream.stderr.on('data', (c: Buffer) => (stderr += c.toString()))
-            stream.on('close', (code: number) =>
-              code === 0
-                ? resolve()
-                : reject(new Error(stderr.trim() || `install exited ${code}`)),
-            )
-          })
+      let seq = 0
+      const verbose = getSettings().verboseLogging
+      const log: Log = (level, message, detail) => {
+        // `debug` carries commands and raw output; everything else always ships,
+        // because which step failed should never be behind a setting.
+        if (level === 'debug' && !verbose) return
+        emit({
+          kind: 'op',
+          opId,
+          entry: { id: `${opId}-${seq++}`, ts: Date.now(), level, message, detail },
         })
-        client.end()
-
-        // Prove key auth actually works before trusting it.
-        updateServer(serverId, { keyId })
-        const verifying = getServer(serverId)!
-        const check = await ssh.exec(verifying, 'true', 8_000)
-        if (check.error) {
-          updateServer(serverId, { keyId: null })
-          return { ok: false, error: `Key installed but did not authenticate: ${check.error}` }
-        }
-        bridge.register()
-        return { ok: true }
-      } catch (err) {
-        return { ok: false, error: (err as Error).message }
       }
+
+      let result: { ok: boolean; error?: string }
+      try {
+        result = await installKey(serverId, keyId, password, log)
+      } catch (err) {
+        // installKey handles its own failures; this is the last line of defence so
+        // an unexpected throw still resolves the UI rather than hanging it.
+        const message = (err as Error).message
+        log('error', `Unexpected failure: ${message}`)
+        result = { ok: false, error: message }
+      }
+
+      if (result.ok) bridge.register() // server may now be reachable for tool calls
+      emit({ kind: 'op-done', opId, ok: result.ok, error: result.error })
+      return result
     },
   )
 

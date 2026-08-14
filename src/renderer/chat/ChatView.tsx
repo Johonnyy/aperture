@@ -75,14 +75,16 @@ export function ChatView({ amber }: { amber: Amber }): React.JSX.Element {
 
       <div className="border-t border-line bg-raised/60 px-6 py-4">
         <div className="mx-auto flex max-w-3xl items-end gap-3">
+          {/* Never disabled. Composing a message while the socket is down is
+              perfectly reasonable — only *sending* needs a connection, and a dead
+              input box gives no clue why it's dead. */}
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onKeyDown}
             rows={1}
-            placeholder={connected ? 'Message Amber…' : 'Not connected'}
-            disabled={!connected}
-            className="max-h-40 min-h-[44px] flex-1 resize-y rounded-[14px] border border-line bg-ground px-4 py-3 text-[15px] text-ink outline-none placeholder:text-muted focus:border-amber-deep disabled:opacity-50"
+            placeholder={connected ? 'Message Amber…' : 'Message Amber (not connected yet)'}
+            className="max-h-40 min-h-[44px] flex-1 resize-y rounded-[14px] border border-line bg-ground px-4 py-3 text-[15px] text-ink outline-none placeholder:text-muted focus:border-amber-deep"
           />
 
           <button
@@ -121,6 +123,19 @@ export function ChatView({ amber }: { amber: Amber }): React.JSX.Element {
             </button>
           )}
         </div>
+
+        {!connected && (
+          <p className="mx-auto mt-2 flex max-w-3xl items-center gap-2 text-xs text-muted">
+            Not connected to Amber, so nothing can be sent yet.
+            <button
+              type="button"
+              onClick={() => void window.aperture.amber.connect()}
+              className="rounded-lg border border-line px-2 py-0.5 text-[11px] text-ink transition hover:border-amber-deep"
+            >
+              Connect
+            </button>
+          </p>
+        )}
 
         {awaiting && (
           <p className="mx-auto mt-2 max-w-3xl text-xs text-amber">

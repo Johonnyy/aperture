@@ -37,6 +37,27 @@ export type ApertureEvent =
   | { kind: 'trace'; entry: TraceEntry }
   /** The full set of commands waiting on a human — replaces the previous set. */
   | { kind: 'approvals'; pending: PendingApproval[] }
+  /** One narrated step of a long-running operation (see `OpLogEntry`). */
+  | { kind: 'op'; opId: string; entry: OpLogEntry }
+  | { kind: 'op-done'; opId: string; ok: boolean; error?: string }
+
+// --- operation logs ---------------------------------------------------------
+
+/**
+ * `debug` lines carry the low-level detail — the exact command, raw stdout, the
+ * host key — and are only emitted when `verboseLogging` is on. Everything else is
+ * always emitted: knowing which step failed should never be opt-in.
+ */
+export type OpLogLevel = 'info' | 'ok' | 'warn' | 'error' | 'debug'
+
+export interface OpLogEntry {
+  id: string
+  ts: number
+  level: OpLogLevel
+  message: string
+  /** Verbatim output, a command, a fingerprint. Rendered monospace. */
+  detail?: string
+}
 
 /**
  * A line in the Status Panel's live trace. Distinct from `AuditEntry`: the trace is
@@ -124,6 +145,12 @@ export interface Settings {
   confirmBeforeExec: boolean
   /** Play Amber's synthesized speech. Off is useful when working in a shared space. */
   playAudio: boolean
+  /**
+   * Include low-level detail in operation logs: exact commands, raw output, host
+   * key fingerprints, auth methods offered. On by default — this is a tool for
+   * seeing what happened, and the quiet version is the one you have to opt into.
+   */
+  verboseLogging: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -132,4 +159,5 @@ export const DEFAULT_SETTINGS: Settings = {
   autoReconnect: true,
   confirmBeforeExec: true,
   playAudio: true,
+  verboseLogging: true,
 }

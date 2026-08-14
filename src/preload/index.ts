@@ -70,13 +70,17 @@ const api = {
       ipcRenderer.invoke(IPC.SSH_GENERATE_KEY, label),
     deleteKey: (id: string): Promise<KeyRecord[]> =>
       ipcRenderer.invoke(IPC.SSH_DELETE_KEY, id),
-    /** Password is used for this one call only and never stored. */
+    /**
+     * Password is used for this one call only and never stored. Progress is pushed
+     * back as `op` events tagged with `opId`, so the caller can render a live log.
+     */
     installKey: (
+      opId: string,
       serverId: string,
       keyId: string,
       password: string,
     ): Promise<{ ok: boolean; error?: string }> =>
-      ipcRenderer.invoke(IPC.SSH_INSTALL_KEY, serverId, keyId, password),
+      ipcRenderer.invoke(IPC.SSH_INSTALL_KEY, opId, serverId, keyId, password),
 
     openShell: (serverId: string): Promise<{ ok: boolean; shellId?: string; error?: string }> =>
       ipcRenderer.invoke(IPC.SSH_OPEN_SHELL, serverId),

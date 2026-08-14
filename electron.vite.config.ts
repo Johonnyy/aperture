@@ -29,12 +29,9 @@ export default defineConfig({
   },
   renderer: {
     root: resolve(__dirname, 'src/renderer'),
-    resolve: {
-      alias: {
-        '@shared': resolve(__dirname, 'src/shared'),
-        '@renderer': resolve(__dirname, 'src/renderer'),
-      },
-    },
+    // No path aliases: every import in the codebase is relative, and a Vite alias
+    // without a matching tsconfig `paths` entry resolves at runtime while failing
+    // typecheck. If aliases are wanted later, add them in both places at once.
     plugins: [react(), tailwindcss()],
     build: {
       rollupOptions: {

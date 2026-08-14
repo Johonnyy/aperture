@@ -1,12 +1,17 @@
 import { createHash } from 'node:crypto'
 import { Client, type ClientChannel, type ConnectConfig } from 'ssh2'
 
-import type { ExecResult, ServerConfig } from '../../shared/types'
+import type { ExecResult, OpLogLevel, ServerConfig } from '../../shared/types'
 import { updateServer } from '../config'
 import { readPrivateKey } from './key-store'
 
 /** Cap captured output so a runaway command can't blow up memory or the audit log. */
 const MAX_OUTPUT = 64 * 1024
+
+/** Narrates a step of an operation. See `OpLogEntry`. */
+export type Log = (level: OpLogLevel, message: string, detail?: string) => void
+
+const noop: Log = () => {}
 
 export interface ConnectOptions {
   /** Password auth, used only for the first connect that installs a key. */
@@ -14,6 +19,8 @@ export interface ConnectOptions {
   /** Accept and pin whatever host key the server presents (first contact only). */
   trustOnFirstUse?: boolean
   timeoutMs?: number
+  /** Narrate progress so the caller can show the user what is happening. */
+  log?: Log
 }
 
 function fingerprintOf(key: Buffer): string {
@@ -31,26 +38,44 @@ function fingerprintOf(key: Buffer): string {
  * every later connection refuses a mismatch outright.
  */
 export function connect(server: ServerConfig, opts: ConnectOptions = {}): Promise<Client> {
+  const log = opts.log ?? noop
   return new Promise((resolve, reject) => {
     const client = new Client()
+    let rejectedHostKey = false
+
     const config: ConnectConfig = {
       host: server.host,
       port: server.port || 22,
       username: server.username,
       readyTimeout: opts.timeoutMs ?? 15_000,
+      // Some servers only offer keyboard-interactive rather than plain password.
+      // Without this, a correct password fails with a generic "all methods failed".
+      tryKeyboard: Boolean(opts.password),
       hostVerifier: (key: Buffer) => {
         const seen = fingerprintOf(key)
         if (!server.fingerprint) {
-          if (!opts.trustOnFirstUse) return false
+          if (!opts.trustOnFirstUse) {
+            rejectedHostKey = true
+            log('error', 'Host key is unknown and this connection will not pin it.')
+            return false
+          }
           updateServer(server.id, { fingerprint: seen })
+          log('ok', 'Pinned host key on first contact', seen)
           return true
         }
-        return server.fingerprint === seen
+        if (server.fingerprint === seen) {
+          log('debug', 'Host key matches the pinned fingerprint', seen)
+          return true
+        }
+        rejectedHostKey = true
+        log('error', 'Host key does not match the pinned fingerprint', `expected ${server.fingerprint}\ngot      ${seen}`)
+        return false
       },
     }
 
     if (opts.password) {
       config.password = opts.password
+      log('info', `Authenticating as ${server.username} with a password`)
     } else if (server.keyId) {
       const privateKey = readPrivateKey(server.keyId)
       if (!privateKey) {
@@ -62,28 +87,55 @@ export function connect(server: ServerConfig, opts: ConnectOptions = {}): Promis
         return
       }
       config.privateKey = privateKey
+      log('info', `Authenticating as ${server.username} with the stored key`)
     } else {
       reject(new Error(`No key installed for ${server.name}, and no password given.`))
       return
     }
 
-    client.once('ready', () => resolve(client))
+    // Servers that answer password auth via keyboard-interactive send a prompt
+    // list instead; reply with the same password rather than failing the attempt.
+    client.on(
+      'keyboard-interactive',
+      (_n, _i, _l, prompts: unknown[], finish: (answers: string[]) => void) => {
+        log('debug', `Server asked ${prompts.length} keyboard-interactive prompt(s)`)
+        finish(prompts.map(() => opts.password ?? ''))
+      },
+    )
+
+    client.once('ready', () => {
+      log('ok', 'Authenticated')
+      resolve(client)
+    })
+
     client.once('error', (err: Error & { level?: string }) => {
-      // A rejected host key surfaces as a generic handshake failure; say what it
-      // actually means so it isn't mistaken for a network problem.
-      if (err.level === 'client-authentication') {
-        reject(new Error(`Authentication failed for ${server.username}@${server.host}.`))
-      } else if (/host.*(key|verif)/i.test(err.message)) {
+      if (rejectedHostKey) {
         reject(
           new Error(
-            `Host key for ${server.host} does not match the pinned fingerprint. ` +
-              'Refusing to connect. If the server was legitimately rebuilt, remove and re-add it.',
+            `Host key verification failed for ${server.host}. If the server was ` +
+              'legitimately rebuilt, remove and re-add it to pin the new key.',
+          ),
+        )
+      } else if (err.level === 'client-authentication') {
+        reject(
+          new Error(
+            `Authentication failed for ${server.username}@${server.host} — ` +
+              'wrong password, or the server does not allow password logins.',
+          ),
+        )
+      } else if (/timed? ?out/i.test(err.message)) {
+        reject(
+          new Error(
+            `Timed out reaching ${server.host}:${server.port || 22}. ` +
+              'Check the host, port, and that sshd is reachable from here.',
           ),
         )
       } else {
         reject(err)
       }
     })
+
+    log('info', `Connecting to ${server.host}:${server.port || 22}`)
     client.connect(config)
   })
 }
@@ -137,6 +189,9 @@ export async function exec(
         finish({ stdout: '', stderr: '', code: null, error: err.message })
         return
       }
+      // Close stdin immediately. Nothing here ever writes to it, and a remote
+      // command that reads stdin would otherwise wait for an EOF that never comes.
+      stream.end()
       stream.on('data', (chunk: Buffer) => {
         if (stdout.length < MAX_OUTPUT) stdout += chunk.toString('utf8')
       })

@@ -86,11 +86,28 @@ export class AmberConnection extends EventEmitter {
     this.resumed = false
     const ws = this.ws
     this.ws = null
-    if (ws) {
-      ws.removeAllListeners()
-      ws.close(1000, 'client disconnect')
-    }
+    if (ws) this.teardown(ws, 'client disconnect')
     this.setState('idle')
+  }
+
+  /**
+   * Discard a socket we no longer want.
+   *
+   * Closing a socket that is still handshaking makes `ws` emit an 'error'
+   * ("WebSocket was closed before the connection was established"). Once the
+   * listeners are gone that becomes an unhandled 'error' event, which Node throws
+   * and Electron shows as a crash dialog — so a swallowing handler goes back on
+   * before anything else happens. This is a socket we are deliberately abandoning;
+   * its failure to finish connecting is the intended outcome, not a fault.
+   */
+  private teardown(socket: WebSocket, reason: string): void {
+    socket.removeAllListeners()
+    socket.on('error', () => {})
+    if (socket.readyState === WebSocket.CONNECTING) {
+      socket.terminate() // abort the handshake rather than wait it out
+    } else {
+      socket.close(1000, reason)
+    }
   }
 
   get isOpen(): boolean {
@@ -132,8 +149,7 @@ export class AmberConnection extends EventEmitter {
     if (this.ws) {
       const stale = this.ws
       this.ws = null
-      stale.removeAllListeners()
-      stale.close(1000, 'superseded')
+      this.teardown(stale, 'superseded')
     }
     this.pendingChunk = null
     this.detail = undefined

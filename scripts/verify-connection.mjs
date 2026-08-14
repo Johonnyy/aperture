@@ -237,10 +237,69 @@ async function testNoDoubleSocket() {
   await amber.close()
 }
 
+/**
+ * Regression: superseding a socket mid-handshake used to raise an unhandled
+ * 'error' ("WebSocket was closed before the connection was established"), which
+ * Electron surfaced as a crash dialog on every launch. React StrictMode triggers
+ * it by double-invoking the effect that auto-connects.
+ */
+async function testSupersedeWhileConnecting() {
+  console.log('\nsuperseding a connecting socket does not throw')
+  const amber = startFakeAmber({ port: 8795 })
+  const conn = new AmberConnection({
+    url: 'ws://127.0.0.1:8795/ws',
+    token: '',
+    autoReconnect: false,
+  })
+  const seen = collect(conn)
+
+  let unhandled = null
+  const onUnhandled = (err) => (unhandled = err)
+  process.once('uncaughtException', onUnhandled)
+  process.once('unhandledRejection', onUnhandled)
+
+  // Both calls land while the first socket is still CONNECTING — no await between.
+  conn.connect()
+  conn.connect()
+  conn.connect()
+
+  const opened = await until(() => conn.isOpen)
+  await wait(500)
+  process.off('uncaughtException', onUnhandled)
+  process.off('unhandledRejection', onUnhandled)
+
+  check('no unhandled error', unhandled === null, unhandled?.message)
+  check('still connects', opened)
+  check(
+    'exactly one ready frame',
+    seen.frames.filter((f) => f.type === 'ready').length === 1,
+    `${seen.frames.filter((f) => f.type === 'ready').length}`,
+  )
+
+  // And disconnecting mid-handshake is the same hazard from the other direction.
+  const second = new AmberConnection({
+    url: 'ws://127.0.0.1:8795/ws',
+    token: '',
+    autoReconnect: false,
+  })
+  let unhandled2 = null
+  const onUnhandled2 = (err) => (unhandled2 = err)
+  process.once('uncaughtException', onUnhandled2)
+  second.connect()
+  second.disconnect() // immediately, still CONNECTING
+  await wait(500)
+  process.off('uncaughtException', onUnhandled2)
+  check('disconnect while connecting is clean', unhandled2 === null, unhandled2?.message)
+
+  conn.disconnect()
+  await amber.close()
+}
+
 await testHappyPath()
 await testResume()
 await testAuthRefusal()
 await testNoDoubleSocket()
+await testSupersedeWhileConnecting()
 
 console.log(failures === 0 ? '\nAll checks passed.' : `\n${failures} check(s) failed.`)
 process.exit(failures === 0 ? 0 : 1)
