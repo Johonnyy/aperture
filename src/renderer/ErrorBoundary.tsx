@@ -40,16 +40,16 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
           </p>
         </div>
 
-        <pre className="overflow-x-auto rounded-[10px] border border-line bg-raised px-3 py-2 font-mono text-xs whitespace-pre-wrap text-danger">
+        <pre className="overflow-x-auto rounded-field border border-line bg-raised px-3 py-2 font-mono text-xs whitespace-pre-wrap text-danger">
           {error.message}
         </pre>
 
         {stack && (
           <details>
-            <summary className="cursor-pointer text-xs text-muted">
+            <summary className="text-xs text-muted">
               Component stack
             </summary>
-            <pre className="mt-2 overflow-x-auto rounded-[10px] border border-line bg-raised px-3 py-2 font-mono text-[11px] whitespace-pre-wrap text-muted">
+            <pre className="mt-2 overflow-x-auto rounded-field border border-line bg-raised px-3 py-2 font-mono text-meta whitespace-pre-wrap text-muted">
               {stack.trim()}
             </pre>
           </details>
@@ -58,7 +58,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
         <button
           type="button"
           onClick={() => window.location.reload()}
-          className="self-start rounded-[10px] border border-amber-deep bg-amber/15 px-3 py-1.5 text-sm text-amber-hi transition hover:bg-amber/25"
+          className="self-start rounded-field border border-accent-deep bg-accent/15 px-3 py-1.5 text-sm text-accent-hi transition hover:bg-accent/25"
         >
           Reload interface
         </button>

@@ -43,7 +43,7 @@ export function EnvEditor({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[11px] text-muted">
+        <span className="text-meta text-muted">
           Edits go to secrets.yaml. Reconcile the app to render them into its .env and
           restart.
         </span>
@@ -55,7 +55,7 @@ export function EnvEditor({
       </div>
 
       {adding && (
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-line p-2">
+        <div className="flex flex-wrap items-center gap-2 rounded-control border border-line p-2">
           <Field value={newName} onChange={setNewName} placeholder="AMBER_SEARCH_API_KEY" />
           <Field
             type={looksSecret(newName) ? 'password' : 'text'}
@@ -114,8 +114,8 @@ function Row({
     <li className="flex flex-wrap items-center gap-2">
       <span
         className={[
-          'w-56 shrink-0 truncate font-mono text-[11px]',
-          v.derived ? 'text-muted' : v.placeholder ? 'text-amber' : 'text-ink/80',
+          'w-56 shrink-0 truncate font-mono text-meta',
+          v.derived ? 'text-muted' : v.placeholder ? 'text-accent' : 'text-ink/80',
         ].join(' ')}
         title={v.name}
       >

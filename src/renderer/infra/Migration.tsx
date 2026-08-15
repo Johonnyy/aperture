@@ -139,7 +139,7 @@ export function Migration({
               >
                 Install {next.name}
               </SmallButton>
-              <span className="text-[10px] text-muted">
+              <span className="text-micro text-muted">
                 rehearses first — nothing changes until you confirm
               </span>
             </div>
@@ -167,12 +167,12 @@ function Step({
 }): React.JSX.Element {
   return (
     <li className="flex gap-2.5">
-      <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-line text-[10px] text-muted">
+      <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-line text-micro text-muted">
         {n}
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <span className="text-[12px] text-ink">{title}</span>
-        <div className="flex flex-col gap-1.5 text-[11px] leading-relaxed text-muted [&_code]:text-ink/70">
+        <span className="text-xs text-ink">{title}</span>
+        <div className="flex flex-col gap-1.5 text-meta leading-relaxed text-muted [&_code]:text-ink/70">
           {children}
         </div>
       </div>

@@ -1,9 +1,10 @@
+import { MONO } from '../../../shared/theme'
 import type { PopupState, Suggestion } from './index'
 
 export type { PopupState }
 
 const KIND: Record<Suggestion['kind'], { badge: string; className: string }> = {
-  history: { badge: 'hist', className: 'text-amber' },
+  history: { badge: 'hist', className: 'text-accent' },
   command: { badge: 'cmd', className: 'text-ok' },
   path: { badge: 'path', className: 'text-ink/70' },
   flag: { badge: 'flag', className: 'text-muted' },
@@ -29,7 +30,9 @@ export function SuggestionPopup({ state }: { state: PopupState }): React.JSX.Ele
             left: state.x,
             top: state.y,
             lineHeight: `${state.cellHeight}px`,
-            fontFamily: "'Cascadia Code', 'JetBrains Mono', Consolas, monospace",
+            // The same constant xterm is built with. These two must never drift —
+            // the ghost is positioned against xterm's cell grid.
+            fontFamily: MONO,
             fontSize: 13,
           }}
           className="pointer-events-none fixed z-40 whitespace-pre text-ink/35"
@@ -41,7 +44,7 @@ export function SuggestionPopup({ state }: { state: PopupState }): React.JSX.Ele
       {state.open && (
         <ul
           style={{ left: state.x, top: state.y + state.cellHeight }}
-          className="pointer-events-none fixed z-50 max-h-64 w-[min(28rem,60vw)] overflow-hidden rounded-[10px] border border-line bg-raised py-1 shadow-2xl"
+          className="pointer-events-none fixed z-50 max-h-64 w-[min(28rem,60vw)] overflow-hidden rounded-field border border-line bg-raised py-1 elev-pop"
         >
           {state.items.map((item, i) => {
             const kind = KIND[item.kind]
@@ -50,16 +53,16 @@ export function SuggestionPopup({ state }: { state: PopupState }): React.JSX.Ele
                 key={`${item.kind}:${item.label}`}
                 aria-selected={i === state.index}
                 className={[
-                  'flex items-center gap-2 px-2.5 py-1 font-mono text-[11px]',
-                  i === state.index ? 'bg-amber/15 text-amber-hi' : 'text-ink/80',
+                  'flex items-center gap-2 px-2.5 py-1 font-mono text-meta',
+                  i === state.index ? 'bg-accent/15 text-accent-hi' : 'text-ink/80',
                 ].join(' ')}
               >
-                <span className={`w-8 shrink-0 text-[9px] ${kind.className}`}>{kind.badge}</span>
+                <span className={`w-8 shrink-0 text-nano ${kind.className}`}>{kind.badge}</span>
                 <span className="truncate">{item.label}</span>
               </li>
             )
           })}
-          <li className="px-2.5 pt-1 text-[10px] text-muted">↑↓ or Tab · Enter accepts · Esc</li>
+          <li className="px-2.5 pt-1 text-micro text-muted">↑↓ or Tab · Enter accepts · Esc</li>
         </ul>
       )}
     </>

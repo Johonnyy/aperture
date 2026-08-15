@@ -52,11 +52,11 @@ export function ChatView({ amber }: { amber: Amber }): React.JSX.Element {
             >
               <div
                 className={[
-                  'max-w-[80%] rounded-[14px] border px-4 py-2.5 text-[15px] leading-relaxed whitespace-pre-wrap',
+                  'max-w-[80%] rounded-panel border px-4 py-2.5 text-lead leading-relaxed whitespace-pre-wrap',
                   m.role === 'user'
                     ? 'border-user/25 bg-user/10 text-ink'
                     : 'border-line bg-raised text-ink',
-                  m.streaming ? 'border-amber/40' : '',
+                  m.streaming ? 'border-accent/40' : '',
                 ].join(' ')}
               >
                 {m.text}
@@ -65,7 +65,7 @@ export function ChatView({ amber }: { amber: Amber }): React.JSX.Element {
           ))}
 
           {thinking && (
-            <div className="flex items-center gap-2 text-sm text-amber">
+            <div className="flex items-center gap-2 text-sm text-accent">
               <span className="animate-pulse-dot">●</span> thinking…
             </div>
           )}
@@ -84,7 +84,7 @@ export function ChatView({ amber }: { amber: Amber }): React.JSX.Element {
             onKeyDown={onKeyDown}
             rows={1}
             placeholder={connected ? 'Message Amber…' : 'Message Amber (not connected yet)'}
-            className="max-h-40 min-h-[44px] flex-1 resize-y rounded-[14px] border border-line bg-ground px-4 py-3 text-[15px] text-ink outline-none placeholder:text-muted focus:border-amber-deep"
+            className="max-h-40 min-h-[44px] flex-1 resize-y rounded-panel border border-line bg-ground px-4 py-3 text-lead text-ink outline-none placeholder:text-muted focus:border-accent-deep"
           />
 
           <button
@@ -98,7 +98,7 @@ export function ChatView({ amber }: { amber: Amber }): React.JSX.Element {
               'h-11 w-11 shrink-0 rounded-full border text-lg transition disabled:opacity-40',
               amber.recording
                 ? 'border-danger bg-danger/20 text-danger'
-                : 'border-line bg-ground text-amber hover:border-amber-deep',
+                : 'border-line bg-ground text-accent hover:border-accent-deep',
             ].join(' ')}
           >
             ●
@@ -108,7 +108,7 @@ export function ChatView({ amber }: { amber: Amber }): React.JSX.Element {
             type="button"
             onClick={submit}
             disabled={!connected || !draft.trim()}
-            className="h-11 shrink-0 rounded-[14px] border border-amber-deep bg-amber/15 px-4 text-sm font-medium text-amber-hi transition hover:bg-amber/25 disabled:opacity-40"
+            className="h-11 shrink-0 rounded-panel border border-accent-deep bg-accent/15 px-4 text-sm font-medium text-accent-hi transition hover:bg-accent/25 disabled:opacity-40"
           >
             Send
           </button>
@@ -117,7 +117,7 @@ export function ChatView({ amber }: { amber: Amber }): React.JSX.Element {
             <button
               type="button"
               onClick={() => void amber.interrupt()}
-              className="h-11 shrink-0 rounded-[14px] border border-danger/50 px-4 text-sm text-danger transition hover:bg-danger/10"
+              className="h-11 shrink-0 rounded-panel border border-danger/50 px-4 text-sm text-danger transition hover:bg-danger/10"
             >
               Stop
             </button>
@@ -130,7 +130,7 @@ export function ChatView({ amber }: { amber: Amber }): React.JSX.Element {
             <button
               type="button"
               onClick={() => void window.aperture.amber.connect()}
-              className="rounded-lg border border-line px-2 py-0.5 text-[11px] text-ink transition hover:border-amber-deep"
+              className="rounded-control border border-line px-2 py-0.5 text-meta text-ink transition hover:border-accent-deep"
             >
               Connect
             </button>
@@ -138,7 +138,7 @@ export function ChatView({ amber }: { amber: Amber }): React.JSX.Element {
         )}
 
         {awaiting && (
-          <p className="mx-auto mt-2 max-w-3xl text-xs text-amber">
+          <p className="mx-auto mt-2 max-w-3xl text-xs text-accent">
             Amber is waiting on your reply — the mic stays open.
           </p>
         )}

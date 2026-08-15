@@ -73,7 +73,7 @@ export function InfraView({
         <SmallButton onClick={onBack}>← Servers</SmallButton>
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-sm font-medium">{server.name}</h2>
-          <p className="truncate font-mono text-[11px] text-muted">
+          <p className="truncate font-mono text-meta text-muted">
             {server.username}@{server.host}
           </p>
         </div>
@@ -93,7 +93,7 @@ export function InfraView({
       </header>
 
       {error && (
-        <p className="rounded-[10px] border border-danger/40 px-3 py-2 text-xs text-danger">
+        <p className="rounded-field border border-danger/40 px-3 py-2 text-xs text-danger">
           {error}
         </p>
       )}
@@ -120,14 +120,14 @@ export function InfraView({
             </SmallButton>
             {password && <Chip tone="ok">held while this view is open</Chip>}
           </div>
-          <p className="text-[11px] text-muted">
+          <p className="text-meta text-muted">
             secrets.yaml is 0600 root, so without this the report falls back to what
             Docker alone can see — domains, pinned tags and env key names are missing.
           </p>
         </Card>
       )}
       {passwordless && (
-        <p className="text-[11px] text-muted">
+        <p className="text-meta text-muted">
           {server.username} has passwordless sudo here — no password needed.
         </p>
       )}
@@ -137,7 +137,7 @@ export function InfraView({
           title="amber-infra is not on this box"
           hint="Clone the repo, then install an app. Every step rehearses first."
         >
-          <ul className="flex list-disc flex-col gap-0.5 pl-4 text-[11px] text-muted">
+          <ul className="flex list-disc flex-col gap-0.5 pl-4 text-meta text-muted">
             {status.warnings.map((w) => (
               <li key={w}>{w}</li>
             ))}
@@ -161,7 +161,7 @@ export function InfraView({
               Stash &amp; update
             </SmallButton>
           </div>
-          <p className="text-[11px] text-muted">
+          <p className="text-meta text-muted">
             After this lands, add the first app with <code className="text-ink/70">install.sh</code>{' '}
             — it writes <code className="text-ink/70">/etc/amber-infra/secrets.yaml</code> for you to
             fill in, then refuses to go further until you have. That is deliberate: a
@@ -247,9 +247,9 @@ export function InfraView({
           </div>
 
           {status.warnings.length > 0 && (
-            <ul className="flex flex-col gap-1 rounded-[10px] border border-line px-3 py-2">
+            <ul className="flex flex-col gap-1 rounded-field border border-line px-3 py-2">
               {status.warnings.map((w) => (
-                <li key={w} className="text-[11px] text-amber">
+                <li key={w} className="text-meta text-accent">
                   {w}
                 </li>
               ))}
@@ -269,7 +269,7 @@ export function InfraView({
               title="The sync-store is not running"
               hint="install.sh brings it up on a core box — unless it cannot get the image."
             >
-              <p className="text-[11px] leading-relaxed text-muted">
+              <p className="text-meta leading-relaxed text-muted">
                 If the install stopped at <em>cannot pull</em>, the tag either never
                 published or the GHCR package is private — a box pulling
                 unauthenticated cannot tell those apart. Its source is in this
@@ -283,7 +283,7 @@ export function InfraView({
                 >
                   Build it here
                 </SmallButton>
-                <span className="text-[10px] text-muted">
+                <span className="text-micro text-muted">
                   then Install, which uses the local image without pulling
                 </span>
               </div>
@@ -321,10 +321,10 @@ export function InfraView({
               <ul className="flex flex-col gap-1.5">
                 {elsewhere.map((app) => (
                   <li key={app.name} className="flex flex-wrap items-center gap-2">
-                    <span className="w-24 shrink-0 truncate text-[12px] text-ink/70">
+                    <span className="w-24 shrink-0 truncate text-xs text-ink/70">
                       {app.name}
                     </span>
-                    <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted">
+                    <span className="min-w-0 flex-1 truncate font-mono text-meta text-muted">
                       {app.domain ?? '—'}
                     </span>
                     <Chip>server {app.server}</Chip>
@@ -404,7 +404,7 @@ export function InfraView({
 
           {status.history.length > 0 && (
             <Card title="Deploy journal" hint="Newest first. Written by rollback.sh and update-amber.sh.">
-              <ul className="flex flex-col gap-1 font-mono text-[10px]">
+              <ul className="flex flex-col gap-1 font-mono text-micro">
                 {status.history.map((h, i) => (
                   <li key={`${h.ts}-${i}`} className="flex gap-2 text-muted">
                     <span className="shrink-0">{h.ts}</span>
@@ -412,7 +412,7 @@ export function InfraView({
                     <span className="truncate">
                       {h.from} → {h.to}
                     </span>
-                    <span className={h.result === 'ok' ? 'text-ok' : 'text-amber'}>{h.result}</span>
+                    <span className={h.result === 'ok' ? 'text-ok' : 'text-accent'}>{h.result}</span>
                   </li>
                 ))}
               </ul>
@@ -492,7 +492,7 @@ function SettingRow({
 
   return (
     <li className="flex flex-wrap items-center gap-2">
-      <span className="w-32 shrink-0 text-[11px] text-muted" title={field.hint}>
+      <span className="w-32 shrink-0 text-meta text-muted" title={field.hint}>
         {field.label}
       </span>
       <Field value={draft} onChange={setDraft} placeholder={field.hint} onEnter={save} />
@@ -533,7 +533,7 @@ function Registry({
           {status.syncStore.containerState}
         </Chip>
         {status.syncStore.detail && (
-          <span className="text-[11px] text-amber">{status.syncStore.detail}</span>
+          <span className="text-meta text-accent">{status.syncStore.detail}</span>
         )}
         <div className="flex-1" />
         <SmallButton
@@ -556,11 +556,11 @@ function Registry({
       ) : (
         <ul className="flex flex-col gap-1">
           {status.syncStore.servers.map((s) => (
-            <li key={s.name} className="flex items-center gap-2 font-mono text-[11px]">
+            <li key={s.name} className="flex items-center gap-2 font-mono text-meta">
               <span className="w-24 shrink-0 truncate text-ink">{s.name}</span>
               <span className="min-w-0 flex-1 truncate text-muted">{s.baseUrl}</span>
               {s.stale && <Chip tone="warn">stale</Chip>}
-              <span className="shrink-0 text-[10px] text-muted">{s.lastSeen ?? '—'}</span>
+              <span className="shrink-0 text-micro text-muted">{s.lastSeen ?? '—'}</span>
               <SmallButton
                 danger
                 disabled={disabled}

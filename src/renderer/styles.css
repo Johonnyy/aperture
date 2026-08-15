@@ -1,28 +1,127 @@
 @import 'tailwindcss';
 
 /*
- * Amber-on-charcoal, carried over from the web dev client so the two clients read
- * as the same product. Declared as Tailwind v4 theme tokens, which generates the
- * `bg-*` / `text-*` / `border-*` utilities for each.
+ * The design tokens. Declared as Tailwind v4 theme tokens, which generates the
+ * `bg-*` / `text-*` / `border-*` / `rounded-*` / `shadow-*` utilities for each.
+ *
+ * IMPORTANT: plain `@theme`, never `@theme inline`. Plain `@theme` compiles a
+ * utility to `var(--color-x)`, which is the whole reason a theme can be swapped at
+ * runtime by overriding the variable. `inline` bakes the literal value into every
+ * rule and would silently kill it.
+ *
+ * The colours below are Darkroom, the default theme. They are the static fallback:
+ * `src/renderer/theme.ts` overrides them on <html> at startup from the palette in
+ * `src/shared/theme.ts`, which is the source of truth. Adding a theme is an edit to
+ * that file and nothing else — see docs/theming.md.
  */
 @theme {
-  --color-ground: #14110d;
-  --color-raised: #1d1812;
-  --color-line: #322a1f;
-  --color-ink: #f2e9da;
-  --color-muted: #9a8f7d;
-  --color-amber: #ffb347;
-  --color-amber-hi: #ffc66b;
-  --color-amber-deep: #c8821f;
-  --color-user: #6fb3ff;
-  --color-danger: #ff6b6b;
-  --color-ok: #5fd08a;
+  /* Drop Tailwind's stock palette. After this, `text-blue-500` and `bg-gray-800`
+   * generate no CSS at all, so new UI cannot reach an unthemed colour by accident —
+   * it fails loudly (an unstyled element) instead of silently (a fixed colour that
+   * ignores the theme). Nothing in the app used the stock palette, so this costs
+   * nothing today and forecloses the most likely way theming rots later.
+   * `transparent` and `current` are taken by the wipe too, so put them back. */
+  --color-*: initial;
+  --color-transparent: transparent;
+  --color-current: currentColor;
 
-  --radius-panel: 14px;
+  /* --- colour: swapped per theme ------------------------------------------ */
+  --color-ground: #14110d; /* app background */
+  --color-raised: #1d1812; /* panels, cards, inputs */
+  --color-line: #322a1f; /* borders, dividers, scrollbar thumb */
+  --color-ink: #f2e9da; /* primary text */
+  --color-muted: #9a8f7d; /* secondary text */
+
+  --color-accent: #ffb347;
+  /* More prominent than `accent` — brighter on a dark theme, *darker* on a light
+   * one. Defining it by prominence rather than by lightness is what lets the same
+   * class names work in both directions. */
+  --color-accent-hi: #ffc66b;
+  /* The structural accent: borders and focus rings. */
+  --color-accent-deep: #c8821f;
+
+  --color-user: #6fb3ff; /* the user's own chat bubble; never the accent hue */
+  --color-ok: #5fd08a;
+  --color-warn: #ffe066; /* distinct from the accent, which *is* the theme */
+  --color-danger: #ff6b6b;
+
+  /* The modal backdrop. Its own token rather than `bg-ground/80`, because on a light
+   * theme an alpha of the ground is a white haze that dims nothing. */
+  --color-scrim: rgb(10 8 6 / 78%);
+
+  /* The title bar band. Derived (`titleBarColor()`), not authored — it is exactly
+   * what `bg-raised/50` resolves to over the ground, made opaque so the OS's window
+   * button overlay can be handed the identical flat colour. */
+  --color-titlebar: #191510;
+
+  --color-glow: rgb(255 179 71 / 6%); /* the ambient wash on <body> */
+  --color-shadow: rgb(0 0 0 / 55%); /* elevation base, carries its own alpha */
+
+  /* --- shape, type, elevation: global, shared by every theme ---------------- */
+  /* App-scale names rather than redefining Tailwind's own `--radius-lg` /
+   * `--text-sm`, so no existing utility silently changes meaning. */
+  --radius-control: 8px; /* buttons, chips, small controls */
+  --radius-field: 10px; /* inputs and settings rows */
+  --radius-panel: 14px; /* cards, dialogs, message bubbles */
+
+  --text-nano: 9px;
+  --text-micro: 10px;
+  --text-meta: 11px;
+  --text-body: 13px;
+  --text-lead: 15px;
 
   --font-sans:
     'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  /* Deliberately *not* per-theme: xterm is built with this and the ghost-completion
+   * overlay is positioned against the resulting cell grid, so the two must agree.
+   * `--font-sans` carries the typographic personality instead. */
   --font-mono: 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+}
+
+/*
+ * Elevation as our own utilities rather than Tailwind's `--shadow-*` namespace.
+ * Tailwind bakes a shadow token's geometry into each utility at build time and only
+ * leaves the *colour* as a variable, so `shadow-pop` could never change shape at
+ * runtime. Reading a custom property directly keeps the whole value swappable —
+ * which is what lets Terminal green use a hard offset and Slate ops use none at all.
+ */
+@utility elev-panel {
+  box-shadow: var(--elev-panel);
+}
+@utility elev-pop {
+  box-shadow: var(--elev-pop);
+}
+
+/*
+ * Window dragging. The app draws its own title bar (`titleBarStyle: 'hidden'`), so
+ * the strip has to declare itself draggable — and anything clickable inside it has
+ * to opt back out, or the button swallows the press into a window move.
+ */
+@utility drag {
+  -webkit-app-region: drag;
+}
+@utility no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/*
+ * Values the hand-written rules below consume, which aren't Tailwind namespaces and
+ * so can't live in `@theme`. `applyTheme()` overrides these on <html> too.
+ */
+:root {
+  /* Darkroom's values, matching THEMES.darkroom.style — the pre-JS fallback. */
+  --pulse-floor: 0.35;
+  --stroke: 1px;
+  --elev-panel: 0 2px 8px rgb(0 0 0 / 55%);
+  --elev-pop: 0 12px 32px rgb(0 0 0 / 55%);
+  --texture-image: none;
+  --texture-size: auto;
+  --texture-blend: normal;
+  --accent-glow: none;
+  --tracking-base: normal;
+  --motion-duration: 150ms;
+  --motion-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  color-scheme: dark;
 }
 
 html,
@@ -31,17 +130,98 @@ body,
   height: 100%;
 }
 
+/*
+ * Tailwind v4's preflight follows the browser default and leaves buttons on
+ * `cursor: default`, which makes every control in the app feel dead on hover. Put
+ * the pointer back once, here, rather than on 33 individual buttons.
+ *
+ * In `@layer base`, so an explicit `cursor-*` utility still wins where a component
+ * wants something else. `:disabled` is excluded and given `not-allowed` instead —
+ * a disabled control shouldn't invite the click that the `disabled:opacity-40`
+ * convention is already telling you won't land.
+ */
+@layer base {
+  button:not(:disabled),
+  select:not(:disabled),
+  summary,
+  [role='button']:not([aria-disabled='true']),
+  [role='radio']:not([aria-disabled='true']),
+  input[type='checkbox']:not(:disabled),
+  input[type='radio']:not(:disabled) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  select:disabled,
+  input:disabled {
+    cursor: not-allowed;
+  }
+}
+
 body {
   margin: 0;
   background: var(--color-ground);
-  background-image: radial-gradient(
-    ellipse at top,
-    rgb(255 179 71 / 6%),
-    transparent 60%
-  );
+  background-image: radial-gradient(ellipse at top, var(--color-glow), transparent 60%);
   color: var(--color-ink);
   font-family: var(--font-sans);
+  letter-spacing: var(--tracking-base);
   overflow: hidden;
+}
+
+/*
+ * The texture overlay: scanlines, paper grain, a lens vignette.
+ *
+ * Above everything including modals, because a CRT's scanlines fall on whatever is
+ * on the screen — but `pointer-events: none` throughout, so it is purely optical and
+ * can never eat a click. Most themes set `none` and this costs nothing.
+ */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+  background-image: var(--texture-image);
+  background-size: var(--texture-size);
+  mix-blend-mode: var(--texture-blend);
+}
+
+/*
+ * Structural overrides, deliberately unlayered so they beat Tailwind's utilities
+ * without a specificity fight.
+ *
+ * Border width has to be intercepted this way: `border` compiles to a literal
+ * `border-width: 1px`, not a variable, so it is the one structural property a theme
+ * cannot reach through a token alone. `border-0` still wins on the edges it zeroes,
+ * because it is more specific about *which* edges than these are — the `<hr>`
+ * pattern (`border-0 border-t border-line`) keeps behaving exactly as before.
+ */
+.border {
+  border-width: var(--stroke);
+}
+.border-t {
+  border-top-width: var(--stroke);
+}
+.border-b {
+  border-bottom-width: var(--stroke);
+}
+.border-l {
+  border-left-width: var(--stroke);
+}
+.border-r {
+  border-right-width: var(--stroke);
+}
+
+/* Phosphor bloom. `none` everywhere except the two themes that glow. */
+.text-accent,
+.text-accent-hi {
+  text-shadow: var(--accent-glow);
+}
+
+/* Let a theme set its own pace. Tailwind's `transition` uses these two. */
+:root {
+  --default-transition-duration: var(--motion-duration);
+  --default-transition-timing-function: var(--motion-ease);
 }
 
 /* Slim scrollbars — the panels are dense and the default chrome is loud. */
@@ -61,10 +241,14 @@ body {
   background: transparent;
 }
 
+::selection {
+  background: color-mix(in oklab, var(--color-accent) 30%, transparent);
+}
+
 @keyframes pulse-dot {
   0%,
   100% {
-    opacity: 0.35;
+    opacity: var(--pulse-floor);
   }
   50% {
     opacity: 1;

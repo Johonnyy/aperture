@@ -1,17 +1,8 @@
-import type { SearchAddon } from '@xterm/addon-search'
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import type { ISearchOptions, SearchAddon } from '@xterm/addon-search'
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 
-import type { ISearchOptions } from '@xterm/addon-search'
-
-/** The overview-ruler colours are required by the addon's type, not optional. */
-const OPTIONS: ISearchOptions = {
-  decorations: {
-    activeMatchBackground: '#ffb347',
-    matchBackground: '#5a4318',
-    activeMatchColorOverviewRuler: '#ffb347',
-    matchOverviewRuler: '#5a4318',
-  },
-}
+import { paletteFor, searchDecorations } from '../../shared/theme'
+import { useStore } from '../store'
 
 /**
  * Find-in-scrollback. Takes the addon by ref rather than by value because the
@@ -27,6 +18,14 @@ export function SearchBar({
   const [query, setQuery] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
+  // Derived per theme rather than a module const. The overview-ruler colours are
+  // required by the addon's type, not optional.
+  const themeId = useStore((s) => s.settings.theme)
+  const options = useMemo<ISearchOptions>(
+    () => ({ decorations: searchDecorations(paletteFor(themeId)) }),
+    [themeId],
+  )
+
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
@@ -39,8 +38,8 @@ export function SearchBar({
     if (!query) return
     const search = addon.current
     if (!search) return
-    if (next) search.findNext(query, OPTIONS)
-    else search.findPrevious(query, OPTIONS)
+    if (next) search.findNext(query, options)
+    else search.findPrevious(query, options)
   }
 
   return (
@@ -50,7 +49,7 @@ export function SearchBar({
         value={query}
         onChange={(e) => {
           setQuery(e.target.value)
-          if (e.target.value) addon.current?.findNext(e.target.value, OPTIONS)
+          if (e.target.value) addon.current?.findNext(e.target.value, options)
           else addon.current?.clearDecorations()
         }}
         onKeyDown={(e) => {
@@ -58,26 +57,26 @@ export function SearchBar({
           if (e.key === 'Escape') onClose()
         }}
         placeholder="Find in scrollback"
-        className="flex-1 rounded-[8px] border border-line bg-ground px-2.5 py-1 font-mono text-[11px] text-ink outline-none focus:border-amber-deep"
+        className="flex-1 rounded-control border border-line bg-ground px-2.5 py-1 font-mono text-meta text-ink outline-none focus:border-accent-deep"
       />
       <button
         type="button"
         onClick={() => find(false)}
-        className="rounded-[8px] border border-line px-2 py-1 text-[11px] text-muted transition hover:border-amber-deep hover:text-ink"
+        className="rounded-control border border-line px-2 py-1 text-meta text-muted transition hover:border-accent-deep hover:text-ink"
       >
         ↑
       </button>
       <button
         type="button"
         onClick={() => find(true)}
-        className="rounded-[8px] border border-line px-2 py-1 text-[11px] text-muted transition hover:border-amber-deep hover:text-ink"
+        className="rounded-control border border-line px-2 py-1 text-meta text-muted transition hover:border-accent-deep hover:text-ink"
       >
         ↓
       </button>
       <button
         type="button"
         onClick={onClose}
-        className="rounded-[8px] border border-line px-2 py-1 text-[11px] text-muted transition hover:border-amber-deep hover:text-ink"
+        className="rounded-control border border-line px-2 py-1 text-meta text-muted transition hover:border-accent-deep hover:text-ink"
       >
         ✕
       </button>

@@ -1,8 +1,10 @@
 /** Small shared pieces for the Infra view. Nothing here holds state. */
 
+/* Status tones are their own colours, deliberately not the accent — the accent *is*
+ * the theme, so borrowing it for "warning" makes the two unreadable together. */
 const TONE = {
   ok: 'border-ok/40 text-ok',
-  warn: 'border-amber-deep text-amber',
+  warn: 'border-warn/50 text-warn',
   danger: 'border-danger/50 text-danger',
   muted: 'border-line text-muted',
 } as const
@@ -15,7 +17,7 @@ export function Chip({
   tone?: keyof typeof TONE
 }): React.JSX.Element {
   return (
-    <span className={`rounded-full border px-2 py-0.5 font-mono text-[10px] ${TONE[tone]}`}>
+    <span className={`rounded-full border px-2 py-0.5 font-mono text-micro ${TONE[tone]}`}>
       {children}
     </span>
   )
@@ -44,12 +46,12 @@ export function SmallButton({
       disabled={disabled}
       title={title}
       className={[
-        'rounded-lg border px-2 py-1 text-[11px] transition disabled:opacity-40',
+        'rounded-control border px-2 py-1 text-meta transition disabled:opacity-40',
         danger
           ? 'border-line text-danger hover:border-danger/50'
           : primary
-            ? 'border-amber-deep bg-amber/15 text-amber-hi hover:bg-amber/25'
-            : 'border-line text-ink hover:border-amber-deep',
+            ? 'border-accent-deep bg-accent/15 text-accent-hi hover:bg-accent/25'
+            : 'border-line text-ink hover:border-accent-deep',
       ].join(' ')}
     >
       {children}
@@ -79,7 +81,7 @@ export function Field({
       onKeyDown={(e) => {
         if (e.key === 'Enter') onEnter?.()
       }}
-      className="min-w-0 flex-1 rounded-lg border border-line bg-raised px-2.5 py-1 font-mono text-[11px] text-ink outline-none focus:border-amber-deep"
+      className="min-w-0 flex-1 rounded-control border border-line bg-raised px-2.5 py-1 font-mono text-meta text-ink outline-none focus:border-accent-deep"
     />
   )
 }
@@ -94,7 +96,7 @@ export function Card({
   children: React.ReactNode
 }): React.JSX.Element {
   return (
-    <section className="flex flex-col gap-2 rounded-[14px] border border-line bg-raised/50 p-3">
+    <section className="flex flex-col gap-2 rounded-panel border border-line bg-raised/50 p-3">
       <div>
         <h3 className="text-sm font-medium">{title}</h3>
         {hint && <p className="text-xs text-muted">{hint}</p>}

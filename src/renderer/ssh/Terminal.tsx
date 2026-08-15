@@ -8,6 +8,9 @@ import { Terminal as XTerm } from '@xterm/xterm'
 import { useEffect, useRef, useState } from 'react'
 import '@xterm/xterm/css/xterm.css'
 
+import type { ITheme } from '@xterm/xterm'
+
+import { MONO, paletteFor, terminalTheme } from '../../shared/theme'
 import type { ServerConfig } from '../../shared/types'
 import { useStore } from '../store'
 import { Completer } from './completion'
@@ -52,6 +55,12 @@ export function Terminal({
   const [popup, setPopup] = useState<PopupState | null>(null)
   const [searching, setSearching] = useState(false)
   const searchRef = useRef<SearchAddon | null>(null)
+  // Held so a theme change can be pushed into a *live* terminal. The creation
+  // effect is keyed on `[server.id]` and must stay that way — re-running it would
+  // dispose the xterm and end the SSH session behind it, which is the whole reason
+  // this component is kept mounted while hidden.
+  const termRef = useRef<XTerm | null>(null)
+  const webglRef = useRef<WebglAddon | null>(null)
 
   const verbose = useStore((s) => s.settings.verboseLogging)
   const localEcho = useStore((s) => s.settings.localEcho)
@@ -67,6 +76,12 @@ export function Terminal({
   const completerRef = useRef<Completer | null>(null)
   const suggestionsRef = useRef(suggestions)
   suggestionsRef.current = suggestions
+
+  const themeId = useStore((s) => s.settings.theme)
+  // Same read-through trick as `echoRef`: the creation effect needs the current
+  // theme without taking a dependency on it.
+  const themeIdRef = useRef(themeId)
+  themeIdRef.current = themeId
   // Read through a ref so a later prop change can't retrigger the effect and tear
   // down a live shell.
   const commandRef = useRef(initialCommand)
@@ -79,20 +94,16 @@ export function Terminal({
     if (!host) return
 
     const term = new XTerm({
-      fontFamily: "'Cascadia Code', 'JetBrains Mono', Consolas, monospace",
+      fontFamily: MONO,
       fontSize: 13,
       cursorBlink: true,
       scrollback: 10_000,
       // Unicode11Addon is a proposed API. Without this it silently does nothing and
       // wide characters keep the wrong width.
       allowProposedApi: true,
-      theme: {
-        background: '#14110d',
-        foreground: '#f2e9da',
-        cursor: '#ffb347',
-        selectionBackground: '#322a1f',
-      },
+      theme: terminalTheme(paletteFor(themeIdRef.current)) as ITheme,
     })
+    termRef.current = term
 
     const fit = new FitAddon()
     const search = new SearchAddon()
@@ -114,9 +125,11 @@ export function Terminal({
       const webgl = new WebglAddon()
       webgl.onContextLoss(() => {
         webgl.dispose()
+        webglRef.current = null
         term.loadAddon(new CanvasAddon())
       })
       term.loadAddon(webgl)
+      webglRef.current = webgl
     } catch {
       term.loadAddon(new CanvasAddon())
     }
@@ -251,8 +264,22 @@ export function Terminal({
       if (shellId) window.aperture.ssh.closeShell(shellId)
       term.dispose()
       searchRef.current = null
+      termRef.current = null
+      webglRef.current = null
     }
   }, [server.id])
+
+  // Recolour in place. Declared after the creation effect so it runs second on
+  // mount, and keyed on the theme alone so a switch never touches the shell.
+  // Hidden terminals re-render too, so every open session follows.
+  useEffect(() => {
+    const term = termRef.current
+    if (!term) return
+    term.options.theme = terminalTheme(paletteFor(themeId)) as ITheme
+    // WebGL bakes colours into a glyph atlas. xterm 5.5 invalidates it on an
+    // options change, but clearing is cheap and removes the doubt.
+    webglRef.current?.clearTextureAtlas()
+  }, [themeId])
 
   return (
     <div className={hidden ? 'hidden' : 'relative flex min-h-0 flex-1 flex-col'}>
@@ -260,10 +287,10 @@ export function Terminal({
         <span className="font-mono text-xs text-muted">
           {server.username}@{server.host}
         </span>
-        {closed && <span className="text-[11px] text-muted">closed</span>}
+        {closed && <span className="text-meta text-muted">closed</span>}
         {verbose && latency !== null && (
           <span
-            className="font-mono text-[10px] text-muted"
+            className="font-mono text-micro text-muted"
             title="Measured round-trip from keystroke to echo. Local echo turns itself on above the threshold in Settings."
           >
             {Math.round(latency)}ms
@@ -274,14 +301,14 @@ export function Terminal({
           type="button"
           onClick={() => setSearching((s) => !s)}
           title="Find (Ctrl+Shift+F)"
-          className="rounded-[8px] border border-line px-2 py-1 text-[11px] transition hover:border-amber-deep"
+          className="rounded-control border border-line px-2 py-1 text-meta transition hover:border-accent-deep"
         >
           Find
         </button>
         <button
           type="button"
           onClick={onClose}
-          className="rounded-[8px] border border-line px-2 py-1 text-[11px] transition hover:border-amber-deep"
+          className="rounded-control border border-line px-2 py-1 text-meta transition hover:border-accent-deep"
         >
           Close
         </button>

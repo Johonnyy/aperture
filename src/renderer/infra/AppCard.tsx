@@ -85,7 +85,7 @@ export function AppCard({
   }
 
   return (
-    <li className="rounded-[14px] border border-line bg-raised/50 p-3">
+    <li className="rounded-panel border border-line bg-raised/50 p-3">
       <div className="flex flex-wrap items-center gap-3">
         <span
           title={`container ${app.container} · health ${app.health}`}
@@ -98,7 +98,7 @@ export function AppCard({
               : app.health === 'healthy'
                 ? 'bg-ok'
                 : app.container === 'running'
-                  ? 'bg-amber'
+                  ? 'bg-accent'
                   : 'bg-danger',
           ].join(' ')}
         />
@@ -111,17 +111,17 @@ export function AppCard({
                 href={`https://${app.domain}`}
                 target="_blank"
                 rel="noreferrer"
-                className="truncate font-mono text-[11px] text-muted hover:text-amber-hi"
+                className="truncate font-mono text-meta text-muted hover:text-accent-hi"
               >
                 {app.domain}
               </a>
             )}
           </p>
-          <p className="truncate font-mono text-[11px] text-muted">
+          <p className="truncate font-mono text-meta text-muted">
             {app.imagePinned ?? 'no pinned image'}
           </p>
           {drift && (
-            <p className="truncate font-mono text-[11px] text-amber">
+            <p className="truncate font-mono text-meta text-accent">
               running {app.imageRunning} — restart to pick up the pin
             </p>
           )}
@@ -178,7 +178,7 @@ export function AppCard({
       </div>
 
       {open && (
-        <div className="mt-3 flex flex-col gap-3 rounded-[10px] border border-line bg-ground p-3">
+        <div className="mt-3 flex flex-col gap-3 rounded-field border border-line bg-ground p-3">
           {/* Everything from Restart down needs a container. Offering them against
               nothing produces a raw daemon error and an operation log that reads like
               a fault rather than an absence. `gone` is the reason, shown on hover. */}
@@ -256,7 +256,7 @@ export function AppCard({
             >
               Set tag
             </SmallButton>
-            <span className="text-[10px] text-muted">
+            <span className="text-micro text-muted">
               writes secrets.yaml — reconcile or restart afterwards to deploy it
             </span>
           </Row>
@@ -303,7 +303,7 @@ export function AppCard({
             >
               Rename
             </SmallButton>
-            <span className="text-[10px] text-muted">
+            <span className="text-micro text-muted">
               config only, and only before it is deployed
             </span>
           </Row>
@@ -317,7 +317,7 @@ export function AppCard({
                 >
                   Remove declaration
                 </SmallButton>
-                <span className="text-[10px] text-muted">
+                <span className="text-micro text-muted">
                   edits secrets.yaml only — there is nothing deployed to uninstall.
                   Keeping it is what lets you install again later.
                 </span>
@@ -331,7 +331,7 @@ export function AppCard({
 
           <div className="border-t border-line pt-3">
             <div className="mb-2 flex items-center gap-2">
-              <span className="w-16 shrink-0 text-[11px] text-muted">Env</span>
+              <span className="w-16 shrink-0 text-meta text-muted">Env</span>
               {drifted.length > 0 && (
                 <Chip tone="warn">
                   {drifted.length} not yet in the running .env
@@ -341,7 +341,7 @@ export function AppCard({
             {app.env.length > 0 ? (
               <EnvEditor app={app.name} vars={app.env} run={run} disabled={false} />
             ) : (
-              <p className="text-[11px] text-muted">
+              <p className="text-meta text-muted">
                 Nothing under <code>apps.{app.name}.env</code>, or secrets.yaml could not
                 be read — enter the sudo password and re-read.
               </p>
@@ -394,7 +394,7 @@ function Row({
 }): React.JSX.Element {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <span className="w-16 shrink-0 text-[11px] text-muted">{label}</span>
+      <span className="w-16 shrink-0 text-meta text-muted">{label}</span>
       {children}
     </div>
   )

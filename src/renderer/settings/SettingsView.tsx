@@ -1,7 +1,9 @@
 import { useState } from 'react'
 
+import { THEMES, swatches, type Palette, type ThemeId } from '../../shared/theme'
 import type { Settings } from '../../shared/types'
 import { useStore } from '../store'
+import { applyTheme } from '../theme'
 
 export function SettingsView(): React.JSX.Element {
   const settings = useStore((s) => s.settings)
@@ -18,6 +20,21 @@ export function SettingsView(): React.JSX.Element {
     setTimeout(() => setSaved(false), 2000)
   }
 
+  /**
+   * Theme is the one setting that applies on click rather than on Save: it is pure
+   * presentation with no side effects, and the preview *is* the decision — a Save
+   * gate would make you commit to a look you can't see. Everything else on this page
+   * has consequences and keeps the draft discipline.
+   *
+   * `draft` has to move too, or `dirty` (a stringify comparison against `settings`)
+   * would read as permanently unsaved.
+   */
+  const pickTheme = (theme: ThemeId): void => {
+    setDraft((d) => ({ ...d, theme }))
+    applyTheme(theme) // ahead of the round trip, so the preview is same-frame
+    void window.aperture.settings.set({ theme }).then(setSettings)
+  }
+
   const reconnect = async (): Promise<void> => {
     await save()
     // URL and token only take effect on a fresh dial, so bounce the socket.
@@ -25,7 +42,7 @@ export function SettingsView(): React.JSX.Element {
     await window.aperture.amber.connect()
   }
 
-  const field = 'w-full rounded-[10px] border border-line bg-ground px-3 py-2 text-sm text-ink outline-none focus:border-amber-deep'
+  const field = 'w-full rounded-field border border-line bg-ground px-3 py-2 text-sm text-ink outline-none focus:border-accent-deep'
 
   return (
     <section className="mx-auto flex w-full max-w-2xl flex-col gap-6 overflow-y-auto px-6 py-8">
@@ -35,6 +52,29 @@ export function SettingsView(): React.JSX.Element {
           Stored locally in your user data directory.
         </p>
       </div>
+
+      <fieldset className="flex flex-col gap-1.5 border-0 p-0">
+        <legend className="text-sm">Appearance</legend>
+        <div
+          role="radiogroup"
+          aria-label="Theme"
+          className="mt-1.5 grid grid-cols-[repeat(auto-fit,minmax(190px,1fr))] gap-2"
+        >
+          {Object.values(THEMES).map((theme) => (
+            <ThemeCard
+              key={theme.id}
+              theme={theme}
+              selected={draft.theme === theme.id}
+              onPick={() => pickTheme(theme.id)}
+            />
+          ))}
+        </div>
+        <span className="text-xs text-muted">
+          Applies immediately. Open terminals recolour in place — nothing reconnects.
+        </span>
+      </fieldset>
+
+      <hr className="border-0 border-t border-line" />
 
       <label className="flex flex-col gap-1.5">
         <span className="text-sm">Amber URL</span>
@@ -144,14 +184,14 @@ export function SettingsView(): React.JSX.Element {
           type="button"
           onClick={() => void save()}
           disabled={!dirty}
-          className="rounded-[10px] border border-amber-deep bg-amber/15 px-4 py-2 text-sm text-amber-hi transition hover:bg-amber/25 disabled:opacity-40"
+          className="rounded-field border border-accent-deep bg-accent/15 px-4 py-2 text-sm text-accent-hi transition hover:bg-accent/25 disabled:opacity-40"
         >
           Save
         </button>
         <button
           type="button"
           onClick={() => void reconnect()}
-          className="rounded-[10px] border border-line px-4 py-2 text-sm text-ink transition hover:border-amber-deep"
+          className="rounded-field border border-line px-4 py-2 text-sm text-ink transition hover:border-accent-deep"
         >
           Save &amp; reconnect
         </button>
@@ -163,6 +203,98 @@ export function SettingsView(): React.JSX.Element {
         )}
       </div>
     </section>
+  )
+}
+
+/**
+ * A theme card drawn *in its own theme* — its ground and raised colours, its corner
+ * radius, its border width, its typeface, its elevation and its texture.
+ *
+ * A row of colour swatches can't tell you that Terminal green is square and
+ * monospaced or that Golden hour is round and soft, and those are the differences you
+ * actually pick on. Everything here reads from the palette, so a seventh theme gets a
+ * truthful preview for free — it cannot drift from what switching will really do.
+ */
+function ThemeCard({
+  theme,
+  selected,
+  onPick,
+}: {
+  theme: Palette
+  selected: boolean
+  onPick: () => void
+}): React.JSX.Element {
+  const { colors, style } = theme
+
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      onClick={onPick}
+      className="relative overflow-hidden text-left transition focus-visible:ring-2 focus-visible:ring-accent-deep focus-visible:outline-none"
+      style={{
+        background: colors.ground,
+        borderStyle: 'solid',
+        borderColor: selected ? colors.accentDeep : colors.line,
+        borderWidth: selected ? `max(${style.stroke}, 2px)` : style.stroke,
+        borderRadius: style.radius.panel,
+        boxShadow: style.elevation.panel,
+        fontFamily: style.sans,
+        letterSpacing: style.tracking,
+        padding: '0.75rem',
+      }}
+    >
+      {/* The theme's own texture, at card scale. Purely optical, like the real one. */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundImage: style.texture.image,
+          backgroundSize: style.texture.size,
+          mixBlendMode: style.texture.blend as React.CSSProperties['mixBlendMode'],
+        }}
+      />
+
+      <span className="relative flex flex-col gap-2">
+        <span>
+          <span className="block text-body" style={{ color: colors.ink }}>
+            {theme.label}
+          </span>
+          <span className="block text-meta" style={{ color: colors.muted }}>
+            {theme.hint}
+          </span>
+        </span>
+
+        {/* A miniature of the primary button — the one control whose treatment
+            carries the accent, the radius and the glow all at once. */}
+        <span className="flex items-center gap-1.5">
+          <span
+            className="px-2 py-0.5 text-micro"
+            style={{
+              background: `color-mix(in oklab, ${colors.accent} 15%, transparent)`,
+              color: colors.accentHi,
+              borderStyle: 'solid',
+              borderWidth: style.stroke,
+              borderColor: colors.accentDeep,
+              borderRadius: style.radius.control,
+              textShadow: style.accentGlow,
+            }}
+          >
+            Aa
+          </span>
+          {swatches(theme)
+            .slice(1)
+            .map((color, i) => (
+              <span
+                key={i}
+                className="h-5 flex-1"
+                style={{ background: color, borderRadius: style.radius.control }}
+              />
+            ))}
+        </span>
+      </span>
+    </button>
   )
 }
 
@@ -183,7 +315,7 @@ function Toggle({
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        className="mt-0.5 h-4 w-4 accent-[var(--color-amber)]"
+        className="mt-0.5 h-4 w-4 accent-(--color-accent)"
       />
       <span className="flex flex-col gap-0.5">
         <span className="text-sm">{label}</span>

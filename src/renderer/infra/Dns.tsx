@@ -20,7 +20,7 @@ export function DnsRecords({ status }: { status: InfraStatus }): React.JSX.Eleme
 
   if (records.length === 0) {
     return (
-      <p className="text-[11px] text-muted">
+      <p className="text-meta text-muted">
         Nothing here needs a record yet. Each app gets one when you install it.
       </p>
     )
@@ -30,7 +30,7 @@ export function DnsRecords({ status }: { status: InfraStatus }): React.JSX.Eleme
     <>
       <div className="flex flex-wrap items-center gap-2">
         {publicIp ? (
-          <span className="font-mono text-[10px] text-muted">this box is {publicIp}</span>
+          <span className="font-mono text-micro text-muted">this box is {publicIp}</span>
         ) : (
           <Chip tone="warn">public IP unknown — records not verified</Chip>
         )}
@@ -45,7 +45,7 @@ export function DnsRecords({ status }: { status: InfraStatus }): React.JSX.Eleme
       <ul className="flex flex-col gap-1">
         {records.map((r) => (
           <li key={r.name} className="flex flex-wrap items-baseline gap-2">
-            <span className="w-3 shrink-0 text-[11px]">
+            <span className="w-3 shrink-0 text-meta">
               {!publicIp ? (
                 <span className="text-muted">·</span>
               ) : r.pointsHere ? (
@@ -54,14 +54,14 @@ export function DnsRecords({ status }: { status: InfraStatus }): React.JSX.Eleme
                 <span className="text-danger">✗</span>
               )}
             </span>
-            <span className="font-mono text-[11px] text-ink">A {r.name}</span>
-            <span className="text-[10px] text-muted">{r.why}</span>
+            <span className="font-mono text-meta text-ink">A {r.name}</span>
+            <span className="text-micro text-muted">{r.why}</span>
             {r.addresses.length === 0 ? (
               <Chip tone="danger">does not resolve</Chip>
             ) : (
               !r.pointsHere &&
               publicIp && (
-                <span className="font-mono text-[10px] text-danger">
+                <span className="font-mono text-micro text-danger">
                   → {r.addresses.join(' ')}
                 </span>
               )
@@ -71,7 +71,7 @@ export function DnsRecords({ status }: { status: InfraStatus }): React.JSX.Eleme
       </ul>
 
       {publicIp && wrong.length > 0 && (
-        <p className="text-[11px] text-amber">
+        <p className="text-meta text-accent">
           Fix these before installing. Caddy requests a certificate the moment a site
           block appears, and Let’s Encrypt rate-limits failures per domain — so
           installing now costs an hour of not being able to retry, not one failed
@@ -80,7 +80,7 @@ export function DnsRecords({ status }: { status: InfraStatus }): React.JSX.Eleme
           is genuinely behind a proxy.
         </p>
       )}
-      <p className="text-[11px] text-muted">
+      <p className="text-meta text-muted">
         Only these. The apex{' '}
         <code className="text-ink/70">
           {status.settings.primaryDomain ?? 'your domain'}

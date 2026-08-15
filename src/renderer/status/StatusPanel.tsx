@@ -5,9 +5,9 @@ import { useStore } from '../store'
 
 const STATE_STYLE: Record<ConnState, { dot: string; label: string }> = {
   idle: { dot: 'bg-muted', label: 'Disconnected' },
-  connecting: { dot: 'bg-amber animate-pulse-dot', label: 'Connecting' },
+  connecting: { dot: 'bg-accent animate-pulse-dot', label: 'Connecting' },
   open: { dot: 'bg-ok', label: 'Connected' },
-  reconnecting: { dot: 'bg-amber animate-pulse-dot', label: 'Reconnecting' },
+  reconnecting: { dot: 'bg-accent animate-pulse-dot', label: 'Reconnecting' },
   error: { dot: 'bg-danger', label: 'Error' },
 }
 
@@ -38,22 +38,22 @@ export function StatusPanel(): React.JSX.Element {
           <span className={`h-2 w-2 rounded-full ${style.dot}`} />
           <span className="text-sm font-medium">{style.label}</span>
           {connection.resumed && (
-            <span className="rounded border border-line px-1.5 py-0.5 text-[10px] text-muted">
+            <span className="rounded border border-line px-1.5 py-0.5 text-micro text-muted">
               resumed
             </span>
           )}
         </div>
 
         {connection.sessionId && (
-          <p className="mt-1.5 truncate font-mono text-[11px] text-muted">
+          <p className="mt-1.5 truncate font-mono text-meta text-muted">
             session {connection.sessionId}
           </p>
         )}
         {connection.detail && (
-          <p className="mt-1 text-[11px] text-muted">{connection.detail}</p>
+          <p className="mt-1 text-meta text-muted">{connection.detail}</p>
         )}
         {connection.state === 'reconnecting' && connection.retryInMs && (
-          <p className="mt-1 text-[11px] text-amber">
+          <p className="mt-1 text-meta text-accent">
             retrying in {Math.round(connection.retryInMs / 1000)}s (attempt{' '}
             {connection.attempt})
           </p>
@@ -63,7 +63,7 @@ export function StatusPanel(): React.JSX.Element {
       {lastError && (
         <div
           className={`flex items-start gap-2 border-b border-line px-4 py-2.5 text-xs ${
-            lastError.code && ACTIONABLE.has(lastError.code) ? 'text-amber' : 'text-danger'
+            lastError.code && ACTIONABLE.has(lastError.code) ? 'text-accent' : 'text-danger'
           }`}
         >
           <div className="flex-1">
@@ -84,12 +84,12 @@ export function StatusPanel(): React.JSX.Element {
       {/* --- memory --- */}
       {memoryItems.length > 0 && (
         <div className="border-b border-line px-4 py-3">
-          <h2 className="mb-2 text-[11px] font-semibold tracking-wide text-muted uppercase">
+          <h2 className="mb-2 text-meta font-semibold tracking-wide text-muted uppercase">
             Drawing on
           </h2>
           <ul className="flex flex-col gap-1">
             {memoryItems.map((item, i) => (
-              <li key={i} className="text-[12px] leading-snug text-ink/80">
+              <li key={i} className="text-xs leading-snug text-ink/80">
                 · {item}
               </li>
             ))}
@@ -99,16 +99,16 @@ export function StatusPanel(): React.JSX.Element {
 
       {/* --- live trace --- */}
       <div className="flex min-h-0 flex-1 flex-col">
-        <h2 className="px-4 pt-3 pb-2 text-[11px] font-semibold tracking-wide text-muted uppercase">
+        <h2 className="px-4 pt-3 pb-2 text-meta font-semibold tracking-wide text-muted uppercase">
           Live trace
         </h2>
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-3">
           {trace.length === 0 ? (
-            <p className="text-[12px] text-muted">
+            <p className="text-xs text-muted">
               Frames appear here as Amber works through a turn.
             </p>
           ) : (
-            <ul className="flex flex-col gap-1 font-mono text-[11px]">
+            <ul className="flex flex-col gap-1 font-mono text-meta">
               {trace.map((entry) => (
                 <li key={entry.id} className="leading-snug">
                   <span className="text-muted">
@@ -119,7 +119,7 @@ export function StatusPanel(): React.JSX.Element {
                       entry.level === 'error'
                         ? 'text-danger'
                         : entry.level === 'warn'
-                          ? 'text-amber'
+                          ? 'text-accent'
                           : 'text-ink/80'
                     }
                   >
@@ -136,7 +136,7 @@ export function StatusPanel(): React.JSX.Element {
         </div>
       </div>
 
-      <p className="border-t border-line px-4 py-2 text-[10px] leading-snug text-muted">
+      <p className="border-t border-line px-4 py-2 text-micro leading-snug text-muted">
         Shows frames Amber sends over the wire. Her own server-side tool calls happen
         inside the agent loop and aren&apos;t visible here.
       </p>
@@ -144,20 +144,20 @@ export function StatusPanel(): React.JSX.Element {
       {/* --- audit log --- */}
       {audit.length > 0 && (
         <details className="border-t border-line">
-          <summary className="cursor-pointer px-4 py-2 text-[11px] font-semibold tracking-wide text-muted uppercase">
+          <summary className="px-4 py-2 text-meta font-semibold tracking-wide text-muted uppercase">
             Command log ({audit.length})
           </summary>
           <ul className="max-h-64 overflow-y-auto px-4 pb-3">
             {audit.map((entry) => (
               <li key={`${entry.id}-${entry.ts}`} className="border-b border-line/50 py-1.5">
-                <div className="flex items-baseline gap-2 text-[11px]">
+                <div className="flex items-baseline gap-2 text-meta">
                   <span className={OUTCOME_STYLE[entry.outcome]}>{entry.outcome}</span>
                   <span className="text-muted">{entry.server}</span>
                   <span className="ml-auto text-muted">
                     {new Date(entry.ts).toLocaleTimeString(undefined, { hour12: false })}
                   </span>
                 </div>
-                <p className="font-mono text-[11px] break-words text-ink/80">
+                <p className="font-mono text-meta break-words text-ink/80">
                   {entry.command}
                 </p>
               </li>
@@ -173,7 +173,7 @@ const OUTCOME_STYLE: Record<string, string> = {
   approved: 'text-ok',
   auto: 'text-ok',
   denied: 'text-muted',
-  timeout: 'text-amber',
+  timeout: 'text-accent',
   error: 'text-danger',
 }
 
@@ -197,29 +197,29 @@ function ApprovalCard({ approval }: { approval: PendingApproval }): React.JSX.El
   }, [approval.expiresAt])
 
   return (
-    <div className="border-b border-amber/40 bg-amber/10 px-4 py-3">
+    <div className="border-b border-accent/40 bg-accent/10 px-4 py-3">
       <div className="flex items-center gap-2">
-        <span className="text-xs font-medium text-amber-hi">Amber wants to run</span>
-        <span className="ml-auto font-mono text-[11px] text-amber">
+        <span className="text-xs font-medium text-accent-hi">Amber wants to run</span>
+        <span className="ml-auto font-mono text-meta text-accent">
           {Math.ceil(remaining / 1000)}s
         </span>
       </div>
-      <p className="mt-1 text-[11px] text-muted">on {approval.server}</p>
-      <pre className="mt-1.5 overflow-x-auto rounded-[8px] bg-ground px-2 py-1.5 font-mono text-[11px] whitespace-pre-wrap text-ink">
+      <p className="mt-1 text-meta text-muted">on {approval.server}</p>
+      <pre className="mt-1.5 overflow-x-auto rounded-control bg-ground px-2 py-1.5 font-mono text-meta whitespace-pre-wrap text-ink">
         {approval.command}
       </pre>
       <div className="mt-2 flex gap-2">
         <button
           type="button"
           onClick={() => void window.aperture.bridge.approve(approval.id)}
-          className="rounded-[8px] border border-ok/50 bg-ok/10 px-3 py-1 text-[11px] text-ok transition hover:bg-ok/20"
+          className="rounded-control border border-ok/50 bg-ok/10 px-3 py-1 text-meta text-ok transition hover:bg-ok/20"
         >
           Approve
         </button>
         <button
           type="button"
           onClick={() => void window.aperture.bridge.deny(approval.id)}
-          className="rounded-[8px] border border-line px-3 py-1 text-[11px] text-muted transition hover:border-danger/50 hover:text-danger"
+          className="rounded-control border border-line px-3 py-1 text-meta text-muted transition hover:border-danger/50 hover:text-danger"
         >
           Deny
         </button>

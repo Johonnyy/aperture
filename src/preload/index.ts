@@ -27,6 +27,10 @@ export interface ShellMessage {
  * are exposed. Subscriptions return an unsubscribe function so React effects can
  * clean up without needing a channel name.
  */
+const THEME_FLAG = '--aperture-theme='
+const THEME_ARG =
+  process.argv.find((arg) => arg.startsWith(THEME_FLAG))?.slice(THEME_FLAG.length) ?? ''
+
 function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
   const listener = (_e: IpcRendererEvent, payload: T): void => cb(payload)
   ipcRenderer.on(channel, listener)
@@ -51,6 +55,20 @@ const api = {
     get: (): Promise<Settings> => ipcRenderer.invoke(IPC.SETTINGS_GET),
     set: (patch: Partial<Settings>): Promise<Settings> =>
       ipcRenderer.invoke(IPC.SETTINGS_SET, patch),
+  },
+
+  theme: {
+    /**
+     * The theme to paint before anything is fetched, handed over as a launch
+     * argument by `main/window.ts` (see `additionalArguments`).
+     *
+     * Everything else here is async, which is exactly what the first paint can't
+     * afford: an `await` means one frame of the wrong theme. Reading it off argv is
+     * synchronous, cannot deadlock the way `sendSync` can, and needs no channel —
+     * and because main is the one supplying it, the window background and the
+     * renderer are guaranteed to agree.
+     */
+    initial: THEME_ARG,
   },
 
   ssh: {

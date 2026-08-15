@@ -1,6 +1,7 @@
 /** Types shared across main, preload and renderer — the IPC vocabulary. */
 
 import type { AudioChunkFrame, ServerFrame } from './protocol'
+import { DEFAULT_THEME, type ThemeId } from './theme'
 
 // --- connection -------------------------------------------------------------
 
@@ -162,6 +163,13 @@ export interface Settings {
   localEchoThresholdMs: number
   /** Offer completions in the terminal (history, commands, paths, known flags). */
   terminalSuggestions: boolean
+  /**
+   * The colour theme. Lives here rather than in the renderer's localStorage — unlike
+   * the sidebar's collapsed state, main needs this one too, to paint the window
+   * background before a renderer exists. Two stores for one value would drift, and
+   * the symptom would be a startup flash nobody can reproduce.
+   */
+  theme: ThemeId
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -174,6 +182,7 @@ export const DEFAULT_SETTINGS: Settings = {
   localEcho: 'auto',
   localEchoThresholdMs: 30,
   terminalSuggestions: true,
+  theme: DEFAULT_THEME,
 }
 
 // --- infrastructure ---------------------------------------------------------

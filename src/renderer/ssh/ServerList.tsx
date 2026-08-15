@@ -1,6 +1,7 @@
 import { useEffect, useState, type KeyboardEvent } from 'react'
 
 import type { KeyRecord, ServerConfig } from '../../shared/types'
+import { SmallButton } from '../infra/parts'
 import { useStore } from '../store'
 import { OperationLog } from './OperationLog'
 
@@ -61,7 +62,7 @@ export function ServerList({ onOpenTerminal, onManage }: Props): React.JSX.Eleme
   }
 
   const field =
-    'rounded-[10px] border border-line bg-ground px-3 py-2 text-sm text-ink outline-none focus:border-amber-deep'
+    'rounded-field border border-line bg-ground px-3 py-2 text-sm text-ink outline-none focus:border-accent-deep'
 
   return (
     <div className="flex flex-col gap-4">
@@ -75,14 +76,14 @@ export function ServerList({ onOpenTerminal, onManage }: Props): React.JSX.Eleme
         <button
           type="button"
           onClick={() => setAdding((a) => !a)}
-          className="rounded-[10px] border border-line px-3 py-1.5 text-xs transition hover:border-amber-deep"
+          className="rounded-field border border-line px-3 py-1.5 text-xs transition hover:border-accent-deep"
         >
           {adding ? 'Cancel' : 'Add server'}
         </button>
       </div>
 
       {adding && (
-        <div className="flex flex-col gap-2 rounded-[14px] border border-line bg-raised/50 p-3">
+        <div className="flex flex-col gap-2 rounded-panel border border-line bg-raised/50 p-3">
           <div className="grid grid-cols-2 gap-2">
             <input
               className={field}
@@ -113,7 +114,7 @@ export function ServerList({ onOpenTerminal, onManage }: Props): React.JSX.Eleme
           <button
             type="button"
             onClick={() => void add()}
-            className="self-start rounded-[10px] border border-amber-deep bg-amber/15 px-3 py-1.5 text-xs text-amber-hi hover:bg-amber/25"
+            className="self-start rounded-field border border-accent-deep bg-accent/15 px-3 py-1.5 text-xs text-accent-hi hover:bg-accent/25"
           >
             Save
           </button>
@@ -128,22 +129,22 @@ export function ServerList({ onOpenTerminal, onManage }: Props): React.JSX.Eleme
 
       <ul className="flex flex-col gap-2">
         {servers.map((server) => (
-          <li key={server.id} className="rounded-[14px] border border-line bg-raised/50 p-3">
+          <li key={server.id} className="rounded-panel border border-line bg-raised/50 p-3">
             <div className="flex items-center gap-3">
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm">
                   {server.name}
                   {server.keyId ? (
-                    <span className="ml-2 text-[10px] text-ok">key auth</span>
+                    <span className="ml-2 text-micro text-ok">key auth</span>
                   ) : (
-                    <span className="ml-2 text-[10px] text-amber">no key</span>
+                    <span className="ml-2 text-micro text-accent">no key</span>
                   )}
                 </p>
-                <p className="truncate font-mono text-[11px] text-muted">
+                <p className="truncate font-mono text-meta text-muted">
                   {server.username}@{server.host}:{server.port}
                 </p>
                 {server.fingerprint && (
-                  <p className="truncate font-mono text-[10px] text-muted">
+                  <p className="truncate font-mono text-micro text-muted">
                     {server.fingerprint}
                   </p>
                 )}
@@ -195,7 +196,7 @@ export function ServerList({ onOpenTerminal, onManage }: Props): React.JSX.Eleme
             )}
 
             {result[server.id] && (
-              <pre className="mt-2 overflow-x-auto rounded-[8px] bg-ground px-2 py-1.5 font-mono text-[11px] whitespace-pre-wrap text-muted">
+              <pre className="mt-2 overflow-x-auto rounded-control bg-ground px-2 py-1.5 font-mono text-meta whitespace-pre-wrap text-muted">
                 {result[server.id]}
               </pre>
             )}
@@ -283,7 +284,7 @@ function InstallPanel({
     // Installing a key is the only reason to be here, so needing one is a step in
     // this flow, not a prerequisite to go satisfy elsewhere.
     return (
-      <div className="mt-3 flex items-center gap-3 rounded-[10px] border border-line bg-ground px-3 py-2.5">
+      <div className="mt-3 flex items-center gap-3 rounded-field border border-line bg-ground px-3 py-2.5">
         <p className="flex-1 text-xs text-muted">
           No key yet — one is needed before it can be installed on {server.name}.
         </p>
@@ -299,17 +300,17 @@ function InstallPanel({
               .catch((err: Error) => setError(err.message))
               .finally(() => setBusy(false))
           }}
-          className="rounded-[8px] border border-amber-deep bg-amber/15 px-2.5 py-1 text-[11px] text-amber-hi transition hover:bg-amber/25 disabled:opacity-40"
+          className="rounded-control border border-accent-deep bg-accent/15 px-2.5 py-1 text-meta text-accent-hi transition hover:bg-accent/25 disabled:opacity-40"
         >
           {busy ? 'Generating…' : 'Generate key'}
         </button>
-        {error && <p className="text-[11px] text-danger">{error}</p>}
+        {error && <p className="text-meta text-danger">{error}</p>}
       </div>
     )
   }
 
   return (
-    <div className="mt-3 flex flex-col gap-2 rounded-[10px] border border-line bg-ground p-3">
+    <div className="mt-3 flex flex-col gap-2 rounded-field border border-line bg-ground p-3">
       <p className="text-xs text-muted">
         Sign in once with the account password so the public key can be added to{' '}
         <code className="text-ink/70">~/.ssh/authorized_keys</code>. It is used for this
@@ -321,7 +322,7 @@ function InstallPanel({
           <select
             value={keyId}
             onChange={(e) => setKeyId(e.target.value)}
-            className="rounded-[8px] border border-line bg-raised px-2 py-1.5 text-xs text-ink outline-none focus:border-amber-deep"
+            className="rounded-control border border-line bg-raised px-2 py-1.5 text-xs text-ink outline-none focus:border-accent-deep"
           >
             {keys.map((k) => (
               <option key={k.id} value={k.id}>
@@ -339,14 +340,14 @@ function InstallPanel({
           onKeyDown={onKeyDown}
           placeholder={`Password for ${server.username}@${server.host}`}
           disabled={busy}
-          className="flex-1 rounded-[8px] border border-line bg-raised px-2.5 py-1.5 text-xs text-ink outline-none focus:border-amber-deep disabled:opacity-50"
+          className="flex-1 rounded-control border border-line bg-raised px-2.5 py-1.5 text-xs text-ink outline-none focus:border-accent-deep disabled:opacity-50"
         />
 
         <button
           type="button"
           onClick={() => void submit()}
           disabled={!password || busy}
-          className="rounded-[8px] border border-amber-deep bg-amber/15 px-3 py-1.5 text-[11px] text-amber-hi transition hover:bg-amber/25 disabled:opacity-40"
+          className="rounded-control border border-accent-deep bg-accent/15 px-3 py-1.5 text-meta text-accent-hi transition hover:bg-accent/25 disabled:opacity-40"
         >
           {busy ? 'Installing…' : 'Install'}
         </button>
@@ -354,13 +355,13 @@ function InstallPanel({
           type="button"
           onClick={onCancel}
           disabled={busy}
-          className="rounded-[8px] border border-line px-3 py-1.5 text-[11px] text-muted transition hover:border-amber-deep hover:text-ink disabled:opacity-40"
+          className="rounded-control border border-line px-3 py-1.5 text-meta text-muted transition hover:border-accent-deep hover:text-ink disabled:opacity-40"
         >
           Cancel
         </button>
       </div>
 
-      {error && <p className="text-[11px] text-danger">{error}</p>}
+      {error && <p className="text-meta text-danger">{error}</p>}
 
       {opId && (
         <OperationLog
@@ -373,33 +374,3 @@ function InstallPanel({
   )
 }
 
-function SmallButton({
-  children,
-  onClick,
-  disabled,
-  danger,
-  title,
-}: {
-  children: React.ReactNode
-  onClick: () => void
-  disabled?: boolean
-  danger?: boolean
-  title?: string
-}): React.JSX.Element {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className={[
-        'rounded-[8px] border px-2 py-1 text-[11px] transition disabled:opacity-40',
-        danger
-          ? 'border-line text-danger hover:border-danger/50'
-          : 'border-line text-ink hover:border-amber-deep',
-      ].join(' ')}
-    >
-      {children}
-    </button>
-  )
-}

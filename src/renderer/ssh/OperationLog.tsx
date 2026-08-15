@@ -14,7 +14,7 @@ import { useStore } from '../store'
 const LEVEL: Record<OpLogLevel, { dot: string; text: string }> = {
   info: { dot: 'bg-muted', text: 'text-ink/80' },
   ok: { dot: 'bg-ok', text: 'text-ok' },
-  warn: { dot: 'bg-amber', text: 'text-amber' },
+  warn: { dot: 'bg-accent', text: 'text-accent' },
   error: { dot: 'bg-danger', text: 'text-danger' },
   debug: { dot: 'bg-line', text: 'text-muted' },
 }
@@ -85,19 +85,19 @@ export function OperationLog({
   }, [dismissable, onClose])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ground/80 p-8">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-8">
       <div
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-[14px] border border-line bg-raised shadow-2xl"
+        className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-panel border border-line bg-raised elev-pop"
       >
         <div className="flex shrink-0 items-center gap-3 border-b border-line px-4 py-3">
           <span
             className={[
               'h-2 w-2 shrink-0 rounded-full',
               running
-                ? 'animate-pulse-dot bg-amber'
+                ? 'animate-pulse-dot bg-accent'
                 : op?.done?.ok
                   ? 'bg-ok'
                   : 'bg-danger',
@@ -105,7 +105,7 @@ export function OperationLog({
           />
           <h2 className="flex-1 truncate text-sm font-medium">{title}</h2>
           {!verbose && (
-            <span className="text-[10px] text-muted">
+            <span className="text-micro text-muted">
               verbose off — low-level detail hidden
             </span>
           )}
@@ -114,7 +114,7 @@ export function OperationLog({
             onClick={onClose}
             disabled={!dismissable}
             title={dismissable ? 'Close' : 'Still running'}
-            className="rounded-lg px-2 py-1 text-xs text-muted transition hover:bg-ink/5 hover:text-ink disabled:opacity-40"
+            className="rounded-control px-2 py-1 text-xs text-muted transition hover:bg-ink/5 hover:text-ink disabled:opacity-40"
           >
             ✕
           </button>
@@ -122,7 +122,7 @@ export function OperationLog({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           {entries.length === 0 && (
-            <p className="font-mono text-[11px] text-muted">Starting…</p>
+            <p className="font-mono text-meta text-muted">Starting…</p>
           )}
 
           <ul className="flex flex-col gap-1.5">
@@ -134,12 +134,12 @@ export function OperationLog({
                     <span className={`block h-1.5 w-1.5 rounded-full ${style.dot}`} />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="font-mono text-[10px] text-muted">
+                    <span className="font-mono text-micro text-muted">
                       {new Date(entry.ts).toLocaleTimeString(undefined, { hour12: false })}
                     </span>{' '}
-                    <span className={`text-[12px] ${style.text}`}>{entry.message}</span>
+                    <span className={`text-xs ${style.text}`}>{entry.message}</span>
                     {entry.detail && (
-                      <pre className="mt-1 overflow-x-auto rounded-lg bg-ground px-2 py-1.5 font-mono text-[11px] whitespace-pre-wrap text-muted">
+                      <pre className="mt-1 overflow-x-auto rounded-control bg-ground px-2 py-1.5 font-mono text-meta whitespace-pre-wrap text-muted">
                         {entry.detail}
                       </pre>
                     )}
@@ -154,7 +154,7 @@ export function OperationLog({
         <div className="flex shrink-0 items-center gap-3 border-t border-line px-4 py-3">
           <p className="flex-1 text-xs">
             {running && stalled ? (
-              <span className="text-amber">
+              <span className="text-accent">
                 Still running after a minute — every step is meant to time out well
                 before this, so it is likely wedged. You can close this.
               </span>
@@ -180,7 +180,7 @@ export function OperationLog({
                   .join('\n'),
               )
             }
-            className="rounded-lg border border-line px-3 py-1.5 text-[11px] text-muted transition hover:border-amber-deep hover:text-ink"
+            className="rounded-control border border-line px-3 py-1.5 text-meta text-muted transition hover:border-accent-deep hover:text-ink"
           >
             Copy log
           </button>
@@ -189,10 +189,10 @@ export function OperationLog({
             onClick={onClose}
             disabled={!dismissable}
             className={[
-              'rounded-lg border px-3 py-1.5 text-[11px] transition disabled:opacity-40',
+              'rounded-control border px-3 py-1.5 text-meta transition disabled:opacity-40',
               confirm && !running
-                ? 'border-line text-muted hover:border-amber-deep hover:text-ink'
-                : 'border-amber-deep bg-amber/15 text-amber-hi hover:bg-amber/25',
+                ? 'border-line text-muted hover:border-accent-deep hover:text-ink'
+                : 'border-accent-deep bg-accent/15 text-accent-hi hover:bg-accent/25',
             ].join(' ')}
           >
             {confirm && !running ? 'Cancel' : 'Close'}
@@ -201,7 +201,7 @@ export function OperationLog({
             <button
               type="button"
               onClick={confirm.onConfirm}
-              className="rounded-lg border border-amber-deep bg-amber/15 px-3 py-1.5 text-[11px] text-amber-hi transition hover:bg-amber/25"
+              className="rounded-control border border-accent-deep bg-accent/15 px-3 py-1.5 text-meta text-accent-hi transition hover:bg-accent/25"
             >
               {confirm.label}
             </button>

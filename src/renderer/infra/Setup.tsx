@@ -42,7 +42,7 @@ export function Setup({
           <li
             key={s}
             className={[
-              'flex items-center gap-2 text-[11px]',
+              'flex items-center gap-2 text-meta',
               s === stage ? 'text-ink' : i < STEPS.indexOf(stage) ? 'text-ok' : 'text-muted',
             ].join(' ')}
           >
@@ -54,7 +54,7 @@ export function Setup({
         ))}
       </ol>
 
-      <div className="mt-2 rounded-[10px] border border-line bg-ground p-3">
+      <div className="mt-2 rounded-field border border-line bg-ground p-3">
         {stage === 'tools' && (
           <Step
             body="Some of the tools the management view depends on are missing. Re-running the bootstrap installs git, jq, curl and yq — status.sh reads secrets.yaml with yq, so until it is there this screen is largely blind."
@@ -116,7 +116,7 @@ export function Setup({
                   in the way the rest of this list is. Say which, so the list can be
                   read for what still blocks you. */}
               {status.apps.some((a) => a.container === 'missing') && (
-                <li className="text-[11px] text-muted">
+                <li className="text-meta text-muted">
                   Some of these belong to apps that are declared but not deployed (
                   {status.apps
                     .filter((a) => a.container === 'missing')
@@ -127,22 +127,22 @@ export function Setup({
                 </li>
               )}
               {!status.secrets.acmeEmailSet && (
-                <li className="font-mono text-[10px] text-amber">
+                <li className="font-mono text-micro text-accent">
                   infra.acme_email — still the example address; Let’s Encrypt needs a real one
                 </li>
               )}
               {status.secrets.placeholders.manual.map((path) => (
-                <li key={path} className="font-mono text-[10px] text-amber">
+                <li key={path} className="font-mono text-micro text-accent">
                   {path} — needs a value only you have
                 </li>
               ))}
               {status.secrets.placeholders.generatable.map((path) => (
-                <li key={path} className="font-mono text-[10px] text-muted">
+                <li key={path} className="font-mono text-micro text-muted">
                   {path} — can be generated
                 </li>
               ))}
               {!status.secrets.readable && (
-                <li className="text-[11px] text-amber">
+                <li className="text-meta text-accent">
                   The file cannot be read from here, so its contents are unknown — enter the
                   sudo password above and re-read.
                 </li>

@@ -1,7 +1,8 @@
-import { BrowserWindow, ipcMain } from 'electron'
+import { BrowserWindow, ipcMain, nativeTheme } from 'electron'
 import { randomUUID } from 'node:crypto'
 
 import { IPC } from '../shared/ipc'
+import { paletteFor } from '../shared/theme'
 import type {
   ApertureEvent,
   ConnectionStatus,
@@ -25,6 +26,7 @@ import {
 import * as infra from './infra'
 import { installKey } from './ssh/install'
 import { deleteKey, isVaultAvailable, listKeys } from './ssh/key-store'
+import { titleBarOverlayFor } from './window'
 import { generateKey } from './ssh/keygen'
 import * as ssh from './ssh/ssh-client'
 import type { Log } from './ssh/ssh-client'
@@ -82,6 +84,20 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
     // time, so push it now — otherwise toggling it wouldn't take effect until the
     // next manual reconnect. URL and token only matter on the next dial.
     amber.updateOptions({ autoReconnect: next.autoReconnect })
+    // Repaint the window chrome so a reload — or the next cold start — never shows
+    // the previous theme behind the renderer. The renderer restyles itself.
+    if (patch.theme) {
+      const theme = paletteFor(next.theme)
+      const overlay = titleBarOverlayFor(theme).titleBarOverlay
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.setBackgroundColor(theme.colors.ground)
+        // Repaint the native window buttons in the new theme. Without this they keep
+        // the previous theme's tint until the app restarts, which is the one place a
+        // theme switch would visibly not take.
+        if (overlay) win.setTitleBarOverlay(overlay)
+      }
+      nativeTheme.themeSource = theme.scheme
+    }
     return next
   })
 

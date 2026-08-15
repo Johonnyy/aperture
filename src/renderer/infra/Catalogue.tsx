@@ -37,7 +37,7 @@ export function Catalogue({
 
   return (
     <ul className="flex flex-col gap-2 border-t border-line pt-3">
-      <li className="text-[11px] text-muted">
+      <li className="text-meta text-muted">
         In the amber-infra checkout but not declared here. Add apps to that repo, not to
         this screen.
       </li>
@@ -65,12 +65,12 @@ function Row({
   const here = !server || server === status.serverLabel
 
   return (
-    <li className="flex flex-col gap-2 rounded-lg border border-line p-2.5">
+    <li className="flex flex-col gap-2 rounded-control border border-line p-2.5">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm">{entry.name}</span>
         {entry.image && <Chip>{entry.image}</Chip>}
         {entry.upstream && <Chip>{entry.upstream}</Chip>}
-        <span className="text-[10px] text-muted">from the checkout</span>
+        <span className="text-micro text-muted">from the checkout</span>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -94,7 +94,7 @@ function Row({
       </div>
 
       {!here && (
-        <p className="text-[10px] text-muted">
+        <p className="text-micro text-muted">
           Assigned to server {server}, so it will be declared but not offered for
           install here. Run the install from that box.
         </p>

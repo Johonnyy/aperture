@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { useStore } from '../store'
-import { AmberIcon, ApertureMark, PanelIcon, ServerIcon, SlidersIcon } from './icons'
+import { AmberIcon, ServerIcon, SlidersIcon } from './icons'
 
 export type View = 'chat' | 'ssh' | 'settings'
 
@@ -24,22 +24,32 @@ const SETTINGS: NavItem = { id: 'settings', label: 'Settings', icon: SlidersIcon
 
 const STORAGE_KEY = 'aperture.sidebar.collapsed'
 
-export function Sidebar({
-  view,
-  onNavigate,
-}: {
-  view: View
-  onNavigate: (view: View) => void
-}): React.JSX.Element {
-  // Pure presentation state, so it belongs in the renderer rather than the config
-  // file main owns. Read synchronously to avoid a first-paint flash of the wrong width.
+/**
+ * Lives here, next to the thing it collapses, but is called by `App` — the toggle
+ * that drives it now sits in the title bar, so the state has to be above both.
+ *
+ * Pure presentation, so it belongs in the renderer rather than the config file main
+ * owns. Read synchronously to avoid a first-paint flash of the wrong width.
+ */
+export function useSidebarCollapsed(): [boolean, () => void] {
   const [collapsed, setCollapsed] = useState(
     () => localStorage.getItem(STORAGE_KEY) === 'true',
   )
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, String(collapsed))
   }, [collapsed])
+  return [collapsed, () => setCollapsed((c) => !c)]
+}
 
+export function Sidebar({
+  view,
+  onNavigate,
+  collapsed,
+}: {
+  view: View
+  onNavigate: (view: View) => void
+  collapsed: boolean
+}): React.JSX.Element {
   const connState = useStore((s) => s.connection.state)
   const connected = connState === 'open'
 
@@ -55,34 +65,10 @@ export function Sidebar({
         collapsed ? 'w-[60px]' : 'w-[212px]',
       ].join(' ')}
     >
-      {/* --- brand + collapse --- */}
-      <div
-        className={[
-          'flex h-[52px] shrink-0 items-center border-b border-line',
-          collapsed ? 'justify-center px-2' : 'gap-2 pr-2 pl-3',
-        ].join(' ')}
-      >
-        {!collapsed && (
-          <>
-            <ApertureMark className="shrink-0 text-amber" />
-            <span className="flex-1 text-[13px] font-semibold tracking-[0.14em] text-amber">
-              APERTURE
-            </span>
-          </>
-        )}
-        <button
-          type="button"
-          onClick={() => setCollapsed((c) => !c)}
-          aria-expanded={!collapsed}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          className="rounded-lg p-1.5 text-muted transition-colors duration-150 hover:bg-ink/5 hover:text-ink focus-visible:ring-2 focus-visible:ring-amber-deep focus-visible:outline-none"
-        >
-          <PanelIcon className={collapsed ? 'rotate-180' : undefined} />
-        </button>
-      </div>
-
       {/* --- navigation ---
+          The brand and the collapse toggle used to head this column; both moved to
+          the title bar, which spans the window and is where a desktop app puts its
+          identity and its panel controls. The sidebar is navigation now, nothing else.
           Deliberately not a scroll container: `overflow-y-auto` would clip the
           collapsed-mode tooltips, which escape the sidebar horizontally and are the
           only labels available at 60px wide. Two rows today, and a nav long enough
@@ -150,14 +136,14 @@ function NavButton({
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
       className={[
-        'group relative flex items-center rounded-lg text-[13px] transition-colors duration-150',
-        'focus-visible:ring-2 focus-visible:ring-amber-deep focus-visible:outline-none',
+        'group relative flex items-center rounded-control text-body transition-colors',
+        'focus-visible:ring-2 focus-visible:ring-accent-deep focus-visible:outline-none',
         collapsed ? 'h-9 justify-center px-0' : 'h-9 gap-2.5 px-2.5',
         // Selection is carried by a tint plus the accent on the label, not a bar
         // down the edge. Inactive rows stay neutral so the active one is the only
         // colored thing in the column.
         active
-          ? 'bg-amber/15 text-amber-hi'
+          ? 'bg-accent/15 text-accent-hi'
           : 'text-muted hover:bg-ink/5 hover:text-ink active:bg-ink/10',
         nested && !collapsed ? 'ml-3' : '',
       ].join(' ')}
@@ -191,16 +177,16 @@ function ConnectionButton({
       }
       title={connected ? 'Disconnect from Amber' : 'Connect to Amber'}
       className={[
-        'group relative flex items-center rounded-lg text-[13px] text-muted transition-colors duration-150',
-        'hover:bg-ink/5 hover:text-ink focus-visible:ring-2 focus-visible:ring-amber-deep focus-visible:outline-none',
+        'group relative flex items-center rounded-control text-body text-muted transition-colors',
+        'hover:bg-ink/5 hover:text-ink focus-visible:ring-2 focus-visible:ring-accent-deep focus-visible:outline-none',
         collapsed ? 'h-9 justify-center px-0' : 'h-9 gap-2.5 px-2.5',
       ].join(' ')}
     >
       <span
         className={[
-          'h-2 w-2 shrink-0 rounded-full transition-colors duration-150',
+          'h-2 w-2 shrink-0 rounded-full transition-colors',
           connected ? 'bg-ok' : state === 'error' ? 'bg-danger' : 'bg-muted',
-          pending ? 'animate-pulse-dot bg-amber' : '',
+          pending ? 'animate-pulse-dot bg-accent' : '',
           // Line the dot up with the icon column above it, so the footer reads as
           // part of the same list rather than a separate widget.
           collapsed ? '' : 'mx-1.5',
@@ -220,7 +206,7 @@ function Tooltip({ children }: { children: React.ReactNode }): React.JSX.Element
   return (
     <span
       role="tooltip"
-      className="pointer-events-none absolute left-full z-50 ml-2 rounded-md border border-line bg-raised px-2 py-1 text-[12px] whitespace-nowrap text-ink opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100"
+      className="pointer-events-none absolute left-full z-50 ml-2 rounded-control border border-line bg-raised px-2 py-1 text-xs whitespace-nowrap text-ink opacity-0 elev-panel transition-opacity group-hover:opacity-100"
     >
       {children}
     </span>

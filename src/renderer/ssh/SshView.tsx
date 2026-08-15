@@ -100,8 +100,8 @@ function TabButton({
       onClick={onClick}
       aria-current={active ? 'page' : undefined}
       className={[
-        'rounded-lg px-2.5 py-1 text-[11px] transition-colors duration-150',
-        active ? 'bg-amber/15 text-amber-hi' : 'text-muted hover:bg-ink/5 hover:text-ink',
+        'rounded-control px-2.5 py-1 text-meta transition-colors',
+        active ? 'bg-accent/15 text-accent-hi' : 'text-muted hover:bg-ink/5 hover:text-ink',
       ].join(' ')}
     >
       {children}
