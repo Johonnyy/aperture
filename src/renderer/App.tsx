@@ -23,7 +23,12 @@ export function App(): React.JSX.Element {
         <div className={view === 'chat' ? 'flex min-h-0 min-w-0 flex-1' : 'hidden'}>
           <ChatView amber={amber} />
         </div>
-        {view === 'ssh' && <SshView />}
+        {/* Same reason as Chat, more sharply: unmounting Servers would dispose every
+            open xterm and end the SSH connections behind them, so glancing at the
+            chat would cost you your shells. */}
+        <div className={view === 'ssh' ? 'flex min-h-0 min-w-0 flex-1' : 'hidden'}>
+          <SshView />
+        </div>
         {view === 'settings' && <SettingsView />}
 
         <StatusPanel />

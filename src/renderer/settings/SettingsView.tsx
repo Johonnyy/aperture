@@ -95,6 +95,50 @@ export function SettingsView(): React.JSX.Element {
         onChange={(confirmBeforeExec) => setDraft({ ...draft, confirmBeforeExec })}
       />
 
+      <hr className="border-0 border-t border-line" />
+
+      <div>
+        <h2 className="text-sm font-medium">Terminal</h2>
+        <p className="mt-1 text-xs text-muted">
+          Applies to open shells immediately — nothing here reconnects anything.
+        </p>
+      </div>
+
+      <Toggle
+        label="Predict typing locally"
+        hint="Draw typed characters dimmed before the remote shell echoes them back, so typing over a slow link feels immediate. It measures the round-trip and only predicts when it is worth it, and it stands down completely in full-screen programs and at password prompts."
+        checked={draft.localEcho === 'auto'}
+        onChange={(on) => setDraft({ ...draft, localEcho: on ? 'auto' : 'off' })}
+      />
+
+      {draft.localEcho === 'auto' && (
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm">Predict above</span>
+          <input
+            className={field}
+            type="number"
+            min={0}
+            max={500}
+            value={draft.localEcho === 'auto' ? draft.localEchoThresholdMs : 30}
+            onChange={(e) =>
+              setDraft({ ...draft, localEchoThresholdMs: Number(e.target.value) || 0 })
+            }
+          />
+          <span className="text-xs text-muted">
+            Milliseconds of measured round-trip. Below this the real echo already beats a
+            prediction, so guessing would only ever be a flicker. The live measurement is
+            in the terminal header when verbose logging is on.
+          </span>
+        </label>
+      )}
+
+      <Toggle
+        label="Suggest commands"
+        hint="Offer completions from shell history, the remote PATH, remote paths, and the flags of docker, systemctl and the amber-infra scripts. Tab accepts the inline suggestion; Ctrl+Space opens the full list. With no suggestion showing, Tab still reaches the remote shell's own completion."
+        checked={draft.terminalSuggestions}
+        onChange={(terminalSuggestions) => setDraft({ ...draft, terminalSuggestions })}
+      />
+
       <div className="flex items-center gap-3">
         <button
           type="button"

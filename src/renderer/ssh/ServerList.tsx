@@ -6,11 +6,13 @@ import { OperationLog } from './OperationLog'
 
 interface Props {
   onOpenTerminal: (server: ServerConfig) => void
+  /** Open the amber-infra management view for this box. */
+  onManage: (server: ServerConfig) => void
 }
 
 const EMPTY = { name: '', host: '', port: 22, username: '' }
 
-export function ServerList({ onOpenTerminal }: Props): React.JSX.Element {
+export function ServerList({ onOpenTerminal, onManage }: Props): React.JSX.Element {
   const [servers, setServers] = useState<ServerConfig[]>([])
   const [keys, setKeys] = useState<KeyRecord[]>([])
   const [draft, setDraft] = useState({ ...EMPTY })
@@ -158,6 +160,13 @@ export function ServerList({ onOpenTerminal }: Props): React.JSX.Element {
                   disabled={busy === server.id}
                 >
                   {server.keyId ? 'Reinstall key' : 'Install key'}
+                </SmallButton>
+                <SmallButton
+                  onClick={() => onManage(server)}
+                  disabled={!server.keyId}
+                  title="Install, update and roll back apps through amber-infra"
+                >
+                  Manage
                 </SmallButton>
                 <SmallButton
                   onClick={() => onOpenTerminal(server)}
@@ -369,17 +378,20 @@ function SmallButton({
   onClick,
   disabled,
   danger,
+  title,
 }: {
   children: React.ReactNode
   onClick: () => void
   disabled?: boolean
   danger?: boolean
+  title?: string
 }): React.JSX.Element {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
+      title={title}
       className={[
         'rounded-[8px] border px-2 py-1 text-[11px] transition disabled:opacity-40',
         danger

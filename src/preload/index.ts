@@ -5,6 +5,8 @@ import type {
   ApertureEvent,
   AuditEntry,
   ConnectionStatus,
+  ExecResult,
+  InfraStatus,
   KeyRecord,
   PendingApproval,
   ServerConfig,
@@ -93,8 +95,49 @@ const api = {
     closeShell: (id: string): void => {
       ipcRenderer.send(IPC.SSH_CLOSE_SHELL, id)
     },
+    /**
+     * Report that xterm finished parsing `chars` characters. Main pauses the ssh2
+     * stream when too much is outstanding, which is what keeps a runaway command
+     * from starving the renderer of the frame it needs to send Ctrl-C.
+     */
+    ackShell: (id: string, chars: number): void => {
+      ipcRenderer.send(IPC.SSH_ACK_SHELL, id, chars)
+    },
+    /** Completion probe on a shell's existing connection. */
+    execOnShell: (id: string, command: string): Promise<ExecResult> =>
+      ipcRenderer.invoke(IPC.SSH_EXEC_ON_SHELL, id, command),
     onShellData: (cb: (message: ShellMessage) => void): (() => void) =>
       subscribe<ShellMessage>(IPC.SHELL_DATA, cb),
+  },
+
+  infra: {
+    /** One round trip: sudo reachability, whether amber-infra is here, and its report. */
+    status: (
+      serverId: string,
+      sudoPassword?: string,
+    ): Promise<{
+      ok: boolean
+      status?: InfraStatus
+      passwordlessSudo?: boolean
+      error?: string
+    }> => ipcRenderer.invoke(IPC.INFRA_STATUS, serverId, sudoPassword),
+    /**
+     * Run one catalogued action. Progress arrives as `op` events tagged with `opId`,
+     * so it renders in the same `OperationLog` the key install uses.
+     *
+     * `sudoPassword` is used for this one call and never stored. `dryRun` runs the
+     * script's own rehearsal — which is the whole reason a GUI over root shell
+     * scripts is defensible: the GUI composes flags, the script proves them.
+     */
+    run: (
+      opId: string,
+      serverId: string,
+      actionId: string,
+      params: Record<string, string>,
+      opts: { dryRun?: boolean; sudoPassword?: string },
+    ): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC.INFRA_RUN, opId, serverId, actionId, params, opts),
+    cancel: (opId: string): Promise<boolean> => ipcRenderer.invoke(IPC.INFRA_CANCEL, opId),
   },
 
   bridge: {

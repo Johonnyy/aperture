@@ -22,6 +22,7 @@ import {
   updateServer,
   updateSettings,
 } from './config'
+import * as infra from './infra'
 import { installKey } from './ssh/install'
 import { deleteKey, isVaultAvailable, listKeys } from './ssh/key-store'
 import { generateKey } from './ssh/keygen'
@@ -207,6 +208,50 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
     ssh.resizeShell(id, cols, rows),
   )
   ipcMain.on(IPC.SSH_CLOSE_SHELL, (_e, id: string) => ssh.closeShell(id))
+  ipcMain.on(IPC.SSH_ACK_SHELL, (_e, id: string, chars: number) => ssh.ackShell(id, chars))
+
+  ipcMain.handle(IPC.SSH_EXEC_ON_SHELL, (_e, id: string, command: string) =>
+    ssh.execOnShell(id, command),
+  )
+
+  // --- infrastructure -------------------------------------------------------
+
+  ipcMain.handle(IPC.INFRA_STATUS, async (_e, serverId: string, sudoPassword?: string) => {
+    const server = getServer(serverId)
+    if (!server) return { ok: false, error: 'Unknown server.' }
+    return infra.readStatus(`status-${serverId}`, server, sudoPassword)
+  })
+
+  /**
+   * Run one catalogued infra action.
+   *
+   * `sudoPassword` arrives per call and is never written anywhere: not to
+   * `servers.json`, not to an `op` entry, not to the audit log. It goes to the
+   * command's stdin and out of scope when this handler returns.
+   */
+  ipcMain.handle(
+    IPC.INFRA_RUN,
+    async (
+      _e,
+      opId: string,
+      serverId: string,
+      actionId: string,
+      params: Record<string, string>,
+      opts: { dryRun?: boolean; sudoPassword?: string },
+    ) => {
+      const server = getServer(serverId)
+      if (!server) {
+        emit({ kind: 'op-done', opId, ok: false, error: 'Unknown server.' })
+        return { ok: false, error: 'Unknown server.' }
+      }
+      return infra.runAction(opId, server, actionId, params ?? {}, opts ?? {}, {
+        emit,
+        verbose: getSettings().verboseLogging,
+      })
+    },
+  )
+
+  ipcMain.handle(IPC.INFRA_CANCEL, (_e, opId: string) => infra.cancelAction(opId))
 
   // --- approvals ------------------------------------------------------------
 

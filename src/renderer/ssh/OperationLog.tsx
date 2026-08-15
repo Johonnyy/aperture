@@ -22,10 +22,16 @@ const LEVEL: Record<OpLogLevel, { dot: string; text: string }> = {
 export function OperationLog({
   opId,
   title,
+  confirm,
   onClose,
 }: {
   opId: string
   title: string
+  /**
+   * Offered once a rehearsal has finished, so the thing you approve is the thing
+   * whose plan you just read. Absent for operations that are already the real run.
+   */
+  confirm?: { label: string; onConfirm: () => void }
   onClose: () => void
 }): React.JSX.Element {
   const op = useStore((s) => s.ops[opId])
@@ -59,10 +65,12 @@ export function OperationLog({
    * thing failed is the entire point of showing this at all.
    */
   useEffect(() => {
-    if (verbose || running || !op?.done?.ok) return
+    // A rehearsal that auto-dismissed would take the plan with it before it could be
+    // read, which is the one thing the confirm step exists to prevent.
+    if (verbose || running || confirm || !op?.done?.ok) return
     const timer = setTimeout(onClose, 900)
     return () => clearTimeout(timer)
-  }, [verbose, running, op?.done?.ok, onClose])
+  }, [verbose, running, confirm, op?.done?.ok, onClose])
 
   const dismissable = !running || stalled
   const entries = op?.entries ?? []
@@ -180,10 +188,24 @@ export function OperationLog({
             type="button"
             onClick={onClose}
             disabled={!dismissable}
-            className="rounded-lg border border-amber-deep bg-amber/15 px-3 py-1.5 text-[11px] text-amber-hi transition hover:bg-amber/25 disabled:opacity-40"
+            className={[
+              'rounded-lg border px-3 py-1.5 text-[11px] transition disabled:opacity-40',
+              confirm && !running
+                ? 'border-line text-muted hover:border-amber-deep hover:text-ink'
+                : 'border-amber-deep bg-amber/15 text-amber-hi hover:bg-amber/25',
+            ].join(' ')}
           >
-            Close
+            {confirm && !running ? 'Cancel' : 'Close'}
           </button>
+          {confirm && !running && op?.done?.ok && (
+            <button
+              type="button"
+              onClick={confirm.onConfirm}
+              className="rounded-lg border border-amber-deep bg-amber/15 px-3 py-1.5 text-[11px] text-amber-hi transition hover:bg-amber/25"
+            >
+              {confirm.label}
+            </button>
+          )}
         </div>
       </div>
     </div>

@@ -30,6 +30,14 @@ export const IPC = {
   SSH_WRITE_SHELL: 'ssh:write-shell',
   SSH_RESIZE_SHELL: 'ssh:resize-shell',
   SSH_CLOSE_SHELL: 'ssh:close-shell',
+  /** renderer -> main: xterm finished parsing N characters. Drives backpressure. */
+  SSH_ACK_SHELL: 'ssh:ack-shell',
+  /** Completion probes, on a shell's already-authenticated connection. */
+  SSH_EXEC_ON_SHELL: 'ssh:exec-on-shell',
+
+  INFRA_STATUS: 'infra:status',
+  INFRA_RUN: 'infra:run',
+  INFRA_CANCEL: 'infra:cancel',
 
   BRIDGE_APPROVE: 'bridge:approve',
   BRIDGE_DENY: 'bridge:deny',

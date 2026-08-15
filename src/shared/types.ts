@@ -151,6 +151,17 @@ export interface Settings {
    * seeing what happened, and the quiet version is the one you have to opt into.
    */
   verboseLogging: boolean
+  /**
+   * Draw typed characters before the remote pty echoes them back.
+   *
+   * `auto` measures the round-trip and only predicts above `localEchoThresholdMs` —
+   * on a nearby box the echo already beats a prediction, so guessing would be a
+   * flicker for nothing. `off` is the escape hatch and the A/B control.
+   */
+  localEcho: 'auto' | 'off'
+  localEchoThresholdMs: number
+  /** Offer completions in the terminal (history, commands, paths, known flags). */
+  terminalSuggestions: boolean
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -160,4 +171,236 @@ export const DEFAULT_SETTINGS: Settings = {
   confirmBeforeExec: true,
   playAudio: true,
   verboseLogging: true,
+  localEcho: 'auto',
+  localEchoThresholdMs: 30,
+  terminalSuggestions: true,
+}
+
+// --- infrastructure ---------------------------------------------------------
+
+/**
+ * The `deploy/status.sh` document version this build knows how to read.
+ *
+ * Shared rather than living in main, because the renderer is what has to decide
+ * whether the report it is about to draw can be trusted. Raise it in step with
+ * `amber-infra`'s `status.sh`.
+ */
+export const EXPECTED_SCHEMA = 6
+
+/**
+ * What a box still carries from before it was containerised.
+ *
+ * This repo assumes it owns 80, 443 and each app's loopback port; a Caddy or an Amber
+ * installed straight onto the host owns them first. `install.sh` refuses in that
+ * situation, correctly — but a refusal several minutes into a run is a poor way to
+ * learn something knowable at a glance.
+ */
+/**
+ * One hostname this box needs, checked against reality.
+ *
+ * Resolved through the box's OWN resolver, because that is the one Caddy will use —
+ * checking from anywhere else answers a different question. `pointsHere` is true when
+ * ANY returned address matches, so a round-robin record is not a false alarm.
+ */
+export interface DnsRecord {
+  name: string
+  /** Which app needs it, or "the registry". */
+  why: string
+  addresses: string[]
+  pointsHere: boolean
+}
+
+export interface HostServices {
+  /** The process holding the port, from `ss`. Null when nothing does. */
+  port80: string | null
+  port443: string | null
+  /** Whether *our* container is the one holding them — both look like "caddy". */
+  caddyContainer: boolean
+  /** systemd units named after things this repo containerises. */
+  units: string[]
+}
+
+/**
+ * One entry under `apps.<name>.env` in `secrets.yaml` — the *editable source*, not
+ * the rendered `.env` beside the container.
+ *
+ * `value` is null for anything `status.sh` classifies as a secret, and that is the
+ * point: an editor does not need to read an API key in order to replace it, so the
+ * status document never carries one and stays safe to poll and log. `set` and
+ * `placeholder` describe the current value without disclosing it.
+ */
+export interface EnvVar {
+  name: string
+  secret: boolean
+  /**
+   * `install.sh` computes this and writes it into the rendered `.env` *after*
+   * rendering secrets.yaml, so whatever is here is overwritten every install —
+   * `*_PUBLIC_URL`, `*_SYNC_STORE_URL`, `*_SYNC_STORE_TOKEN`, `AMBER_UPDATE_COMMAND`.
+   * Editing one is pointless, and listing a placeholder in one as an outstanding task
+   * sends you hunting for a value that is about to be replaced.
+   */
+  derived: boolean
+  /** Still holds a CHANGEME. Rendered into the app's `.env` verbatim if left. */
+  placeholder: boolean
+  set: boolean
+  value: string | null
+}
+
+/**
+ * One app as `amber-infra`'s `deploy/status.sh --json` reports it.
+ *
+ * The union of what `secrets.yaml` declares and what Docker is actually running, so
+ * something deployed by hand still appears — and so `imagePinned` vs `imageRunning`
+ * drift is visible rather than inferred.
+ */
+export interface InfraApp {
+  name: string
+  domain: string | null
+  upstream: string | null
+  imagePinned: string | null
+  imageRunning: string | null
+  /** Docker's container state: running, exited, created, missing… */
+  container: string
+  /** healthy | unhealthy | starting | none | missing */
+  health: string
+  envFile: string | null
+  composeFile: string | null
+  /** Present in the sync-store registry, and when it last checked in. */
+  registered: boolean
+  lastSeen: string | null
+  stale: boolean
+  /** HTTP status of https://<domain>/health, or null if it did not answer. */
+  httpStatus: number | null
+  /**
+   * Which box this app belongs on, from `apps.<name>.server`. Null when unset.
+   *
+   * Until now this field was a comment with syntax — nothing in amber-infra read it.
+   * It means something here, which is exactly why `thisBox` is generous about it.
+   */
+  server: string | null
+  /**
+   * Whether it belongs on the box being viewed.
+   *
+   * True when the labels match *and* when either side is unset. An app is never
+   * hidden on the strength of a field that had no meaning yesterday.
+   */
+  thisBox: boolean
+  /** Has an `apps.<name>` stanza in this box's secrets.yaml. */
+  declared: boolean
+  /** The checkout carries `<name>/docker-compose.prod.yml`, so install.sh can deploy it. */
+  available: boolean
+  /** Env keys present in the *rendered* .env — what the container actually has. */
+  envKeys: string[]
+  /** The editable source in secrets.yaml. Diverges from `envKeys` until reconciled. */
+  env: EnvVar[]
+}
+
+/**
+ * One app this checkout can install.
+ *
+ * The repo is the catalogue: `install.sh` refuses any app without a
+ * `<name>/docker-compose.prod.yml`, so that file's presence is the definition rather
+ * than a hint — and it already carries the pinned image and the loopback port, which
+ * is everything an install needs except a hostname.
+ */
+export interface CatalogueEntry {
+  name: string
+  image: string | null
+  /** e.g. "127.0.0.1:8000", read from the compose file's port binding. */
+  upstream: string | null
+}
+
+export interface InfraStatus {
+  installed: boolean
+  /**
+   * Version of the document `deploy/status.sh` produced.
+   *
+   * 0 means the script on that box predates the field. It matters because a missing
+   * field and a false one are indistinguishable in JSON: without this, an old script
+   * makes every capability read as absent, and the setup flow gets stuck on a step
+   * that has already been done.
+   */
+  schema: number
+  repoRoot: string | null
+  commit: string | null
+  role: string | null
+  primaryDomain: string | null
+  docker: string | null
+  compose: string | null
+  /** False when status.sh ran without the privilege to read secrets.yaml. */
+  secretsReadable: boolean
+  /** Which of the tools the management view depends on are installed. */
+  tools: { git: boolean; jq: boolean; yq: boolean; docker: boolean }
+  secrets: {
+    present: boolean
+    readable: boolean
+    path: string
+    /** False while `infra.acme_email` is still the example's value. */
+    acmeEmailSet: boolean
+    /**
+     * Placeholders still in the file, split by who can fill them: `generatable` say
+     * `CHANGEME-openssl-rand-hex-32` and are a chore, `manual` are API keys nobody
+     * here can invent. The split is what lets setup offer a button for one group and
+     * a shopping list for the other.
+     */
+    placeholders: { generatable: string[]; manual: string[] }
+  }
+  /** Editable, non-secret settings under `infra:` in secrets.yaml. */
+  settings: {
+    acmeEmail: string | null
+    primaryDomain: string | null
+    timezone: string | null
+    role: string | null
+  }
+  hostServices: HostServices
+  /** This box's label, matched against each app's `server`. */
+  serverLabel: string | null
+  /** What this checkout can install, whether or not it is declared or deployed. */
+  catalogue: CatalogueEntry[]
+  /**
+   * The records this box needs and whether they actually resolve to it.
+   *
+   * Listing what you need is not the same as checking it, and the difference is the
+   * whole cost — Caddy asks for a certificate as soon as a site block appears, and
+   * Let's Encrypt rate-limits failures per domain.
+   */
+  dns: { publicIp: string | null; records: DnsRecord[] }
+  apps: InfraApp[]
+  caddy: { running: boolean; health: string; sites: string[] }
+  syncStore: {
+    url: string | null
+    reachable: boolean
+    servers: SyncStoreServer[]
+    containerState: string
+    /** Why it is not answering, when it is not. Four causes, four different fixes. */
+    detail: string | null
+  }
+  history: DeployRecord[]
+  backups: { target: string | null; count: number; newest: string | null }
+  /** Anything status.sh could not determine, verbatim, so nothing fails silently. */
+  warnings: string[]
+}
+
+export interface SyncStoreServer {
+  name: string
+  baseUrl: string
+  lastSeen: string | null
+  stale: boolean
+}
+
+export interface DeployRecord {
+  ts: string
+  service: string
+  from: string
+  to: string
+  result: string
+}
+
+/** One entry in the action catalogue main will run over SSH. See `main/infra`. */
+export interface InfraAction {
+  id: string
+  label: string
+  /** Whether the underlying script accepts `--dry-run`. */
+  rehearsable: boolean
+  needsSudo: boolean
 }
