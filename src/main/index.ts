@@ -5,6 +5,7 @@ import { IPC } from '../shared/ipc'
 import type { ApertureEvent } from '../shared/types'
 import { AmberConnection } from './amber/connection'
 import { ToolBridge } from './amber/tool-bridge'
+import { applyModel } from './amber/model'
 import { applyVoice } from './amber/voice'
 import { verifyLink } from './bloom/link'
 import { hold as holdDeepLink, parseDeepLink } from './bloom/deep-link'
@@ -90,8 +91,10 @@ function buildConnection(): AmberConnection {
       // so without this a stale build's tools stay advertised to the model.
       bridge?.register()
       // Same reasoning for the voice: it lives on Amber's session, so a resume past
-      // the TTL would silently drop back to the server default.
+      // the TTL would silently drop back to the server default. The chosen brain is
+      // session state too, and re-asserted here for exactly the same reason.
       applyVoice(connection, getSettings())
+      applyModel(connection, getSettings())
     } else if (frame.type === 'tool_call') {
       void bridge?.handleToolCall(frame)
     }

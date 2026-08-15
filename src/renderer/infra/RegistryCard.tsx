@@ -1,7 +1,8 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { diagnose, type RegistryNode } from '../../shared/registry'
-import type { InfraStatus } from '../../shared/types'
+import { SYNC_STORE_IMAGE_SCHEMA, type InfraStatus } from '../../shared/types'
+import { compareVersions, tagOf, type ReleaseInfo } from '../../shared/version'
 import { Card, Chip, Field, SmallButton } from './parts'
 import { layoutOf } from './registry-layout'
 import { RegistryMap } from './RegistryMap'
@@ -31,11 +32,14 @@ export function RegistryCard({
   run,
   advanced,
   needsPassword,
+  release,
 }: {
   status: InfraStatus
   run: (actionId: string, title: string, params?: Params) => void
   advanced: boolean
   needsPassword: boolean
+  /** Newest amber-infra release — the registry ships from that repo's tags. */
+  release?: ReleaseInfo
 }): React.JSX.Element {
   const [activeId, setActiveId] = useState<string | null>(null)
   const [width, setWidth] = useState(640)
@@ -136,6 +140,8 @@ export function RegistryCard({
         <p className="text-xs text-muted">Nothing is declared on this box yet.</p>
       )}
 
+      <Version status={status} release={release} run={run} disabled={needsPassword} />
+
       {advanced && <Machinery status={status} nodes={all} run={run} disabled={needsPassword} />}
     </Card>
   )
@@ -210,6 +216,129 @@ function Row({
 }
 
 /**
+ * What version the registry is, and the one button that changes it.
+ *
+ * Ungated, unlike the machinery below, and that is the whole point of adding it: the
+ * registry every app depends on was the one thing on this box whose version could not
+ * be seen and whose update had to be done by hand, in two files, in the right order.
+ * Hiding that behind Advanced mode would have left the default view able to tell you
+ * that everything is linked and unable to tell you the thing they are all linked to is
+ * a year old.
+ *
+ * Three states worth distinguishing, and they read differently on purpose:
+ *
+ *   *behind*   — a newer release exists. The button offers that exact tag.
+ *   *drift*    — secrets.yaml and the deployed compose disagree, which means a pin
+ *                somebody set is not what is running and a reinstall would change the
+ *                version as a side effect. This is the one that must not be silent.
+ *   *level*    — one muted line. Nothing to do.
+ *
+ * An older `status.sh` reports none of these fields, so the line simply doesn't draw;
+ * the update control still does, because a registry whose version you cannot read is
+ * exactly when you want to be able to update it.
+ */
+function Version({
+  status,
+  release,
+  run,
+  disabled,
+}: {
+  status: InfraStatus
+  release?: ReleaseInfo
+  run: (actionId: string, title: string, params?: Params) => void
+  disabled: boolean
+}): React.JSX.Element | null {
+  const store = status.syncStore
+  // Nothing is deployed — "install a registry" is a different offer, and Setup makes
+  // it. Updating one that does not exist is not a coherent thing to click.
+  if (store.containerState === 'missing' && !store.imagePinned) return null
+
+  // An older status.sh reports no image fields at all. Say which it is rather than
+  // printing "unknown", because "we cannot see it" and "it is pinned to something
+  // unreadable" want different next steps — and the update controls still work either
+  // way, which is the case this whole card exists for.
+  const reports = status.schema >= SYNC_STORE_IMAGE_SCHEMA
+
+  const pinned = store.imagePinned ?? null
+  const declared = store.imageDeclared ?? null
+  const running = store.imageRunning ?? null
+  const pinnedTag = tagOf(pinned)
+  const latest = release?.latest ?? null
+  const comparison = compareVersions(pinnedTag, latest)
+
+  // secrets.yaml against the deployed compose. `ensure_sync_store` only writes the
+  // image on first create, so an edited pin waits silently for the next fresh install.
+  const drift = Boolean(declared && pinned && declared !== pinned)
+  // The container against the file it was started from — a compose edit that never got
+  // a restart. Different fix, so a different sentence.
+  const unrestarted = Boolean(running && pinned && running !== pinned)
+
+  const offer = comparison === 'behind' ? latest : null
+
+  return (
+    <div className="flex flex-col gap-1.5 border-t border-line pt-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="w-24 shrink-0 text-meta text-muted">version</span>
+        <span className="min-w-0 flex-1 font-mono text-meta text-ink">
+          {reports ? (
+            <>
+              {pinnedTag ?? pinned ?? 'unknown'}
+              {comparison === 'up-to-date' && latest && (
+                <span className="ml-2 font-sans text-micro text-muted">latest</span>
+              )}
+            </>
+          ) : (
+            <span className="font-sans text-micro text-muted">
+              not reported — this box&apos;s status.sh predates it. Update infra to see
+              it; the controls below work regardless.
+            </span>
+          )}
+        </span>
+        {offer && (
+          <SmallButton
+            disabled={disabled}
+            title={`Pulls ${offer}, restarts, and reverts if it does not come back healthy.`}
+            onClick={() =>
+              run('updateSyncStore', `Update the registry to ${offer}`, { tag: offer })
+            }
+          >
+            Update to {offer}
+          </SmallButton>
+        )}
+        {!offer && (drift || unrestarted) && (
+          <SmallButton
+            disabled={disabled}
+            title="Re-pulls the pinned image, restarts, and makes secrets.yaml agree."
+            onClick={() => run('updateSyncStore', 'Reconcile the registry version')}
+          >
+            Reconcile
+          </SmallButton>
+        )}
+      </div>
+
+      {drift && (
+        <p className="text-micro leading-relaxed text-warn">
+          secrets.yaml pins <code>{tagOf(declared) ?? declared}</code> but{' '}
+          <code>{pinnedTag ?? pinned}</code> is deployed. A reinstall would change the
+          version as a side effect.
+        </p>
+      )}
+      {!drift && unrestarted && (
+        <p className="text-micro leading-relaxed text-warn">
+          Running <code>{tagOf(running) ?? running}</code>, which is not the pinned
+          image — it has not been restarted since the pin changed.
+        </p>
+      )}
+      {release?.error && (
+        <p className="text-micro leading-relaxed text-muted">
+          Could not check for a newer release: {release.error}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
  * A timestamp as an age.
  *
  * `lastSeen` arrives as an ISO string, and the question it answers is "how long ago",
@@ -251,6 +380,7 @@ function Machinery({
 }): React.JSX.Element {
   const [name, setName] = useState('')
   const [token, setToken] = useState('')
+  const [tag, setTag] = useState('')
 
   return (
     <details className="border-t border-line pt-2">
@@ -299,6 +429,26 @@ function Machinery({
             onClick={() => run('buildSyncStore', 'Build the registry image here')}
           >
             Build image here
+          </SmallButton>
+        </div>
+
+        {/* The version row above offers the newest release; this is for any other tag —
+            a rollback, a prerelease, or a box whose release check cannot reach GitHub.
+            Empty means "re-pull the current pin", which is the wedged-container case. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Field value={tag} onChange={setTag} placeholder="tag, e.g. 0.2.0" />
+          <SmallButton
+            disabled={disabled}
+            title="Pulls that tag, restarts, waits for health, and reverts to the last good image if it does not come back. Writes secrets.yaml only on success."
+            onClick={() =>
+              run(
+                'updateSyncStore',
+                tag.trim() ? `Update the registry to ${tag.trim()}` : 'Re-pull the registry',
+                tag.trim() ? { tag: tag.trim() } : undefined,
+              )
+            }
+          >
+            {tag.trim() ? `Update to ${tag.trim()}` : 'Re-pull current pin'}
           </SmallButton>
         </div>
 

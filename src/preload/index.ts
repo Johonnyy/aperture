@@ -12,6 +12,7 @@ import type {
   UsageReport,
 } from '../shared/bloom'
 import { IPC } from '../shared/ipc'
+import type { CatalogueModel } from '../shared/models'
 import type {
   ApertureEvent,
   AuditEntry,
@@ -77,6 +78,19 @@ const api = {
     sendAudio: (buffer: ArrayBuffer): Promise<boolean> =>
       ipcRenderer.invoke(IPC.AMBER_SEND_AUDIO, buffer),
     interrupt: (): Promise<boolean> => ipcRenderer.invoke(IPC.AMBER_INTERRUPT),
+    /**
+     * Point a model keyword at a model — `null` resets it to Amber's default.
+     *
+     * Not a setting of this machine, which is why it is here and not under
+     * `settings`: Amber stores it and shares it with every app through the sync
+     * store. Returns false when the socket is down; the `model` frame that follows a
+     * successful call is what says the change took.
+     */
+    remapModel: (keyword: string, model: string | null): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.AMBER_REMAP_MODEL, keyword, model),
+    /** OpenRouter's public catalogue, to suggest ids. Empty when unreachable. */
+    modelCatalogue: (refresh?: boolean): Promise<CatalogueModel[]> =>
+      ipcRenderer.invoke(IPC.AMBER_MODEL_CATALOGUE, refresh),
     onEvent: (cb: (event: ApertureEvent) => void): (() => void) =>
       subscribe<ApertureEvent>(IPC.EVENT, cb),
   },

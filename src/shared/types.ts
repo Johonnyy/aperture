@@ -180,6 +180,20 @@ export interface Settings {
    */
   ttsVoice: string
   ttsModel: string
+  /**
+   * Which brain this machine asks for, as one of Amber's keywords (`coding`,
+   * `fast`, …) — or a literal `vendor/model` id.
+   *
+   * `''` means **"don't override"**, exactly like `ttsVoice`: the key goes out as an
+   * explicit `null` and Amber uses its own `AMBER_LLM_TIER`. That sentinel is what
+   * keeps "Amber's own choice" a state you can return to rather than a value that
+   * happens to match today.
+   *
+   * Per-connection and held on Amber's session, so it is re-sent on every `ready`.
+   * What a keyword *points at* is not stored here at all — that lives in Amber's
+   * database and the sync store, because it is shared with every other app.
+   */
+  llmKeyword: string
   /** 0.25–4.0, or 0 for Amber's default. 1.0 is unhurried; ~1.2 is conversational. */
   ttsSpeed: number
   /** Prose direction ("warm, brisk"). Only the `gpt-4o-*` models act on it. */
@@ -235,6 +249,7 @@ export const DEFAULT_SETTINGS: Settings = {
   playAudio: true,
   ttsVoice: '',
   ttsModel: '',
+  llmKeyword: '',
   ttsSpeed: 0,
   ttsInstructions: '',
   verboseLogging: true,
@@ -323,6 +338,16 @@ export const MANIFEST_SCHEMA = 9
  * app reads `unclear`, and the offered fix is the one that is safe either way.
  */
 export const REGISTRY_SCHEMA = 10
+
+/**
+ * The document version that reports the registry's own image — feature-detected,
+ * never gated, for the reason above.
+ *
+ * Schema 11 adds `syncStore.imagePinned` / `imageDeclared` / `imageRunning`. Below it
+ * the version row simply doesn't draw; the update control still does, because updating
+ * a registry whose version you cannot read is exactly the situation you want it for.
+ */
+export const SYNC_STORE_IMAGE_SCHEMA = 11
 
 /**
  * What a box still carries from before it was containerised.
@@ -636,6 +661,24 @@ export interface InfraStatus {
     detail: string | null
     /** When the store's container last started, ISO-8601. Present from schema 10. */
     startedAt?: string | null
+    /**
+     * What the deployed compose file runs. Present from schema 11.
+     *
+     * The registry's version was the one thing this tab could not show, which made it
+     * the one thing you could not tell was out of date.
+     */
+    imagePinned?: string | null
+    /**
+     * What `sync_store.image` in secrets.yaml says it should be.
+     *
+     * Separate from `imagePinned` because they genuinely diverge: `ensure_sync_store`
+     * writes the image into the deployed compose only when it first creates it, so a
+     * hand-edited pin looks applied and is silently waiting for the next fresh install
+     * to take effect. `deploy/update-sync-store.sh` writes both.
+     */
+    imageDeclared?: string | null
+    /** What the running container was actually started from. */
+    imageRunning?: string | null
     /**
      * The key list from both sides. Present from schema 10.
      *

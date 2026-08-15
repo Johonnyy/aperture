@@ -2,6 +2,7 @@ import { BrowserWindow, ipcMain, nativeTheme } from 'electron'
 import { randomUUID } from 'node:crypto'
 
 import type { AgentConfigInput, BloomLink } from '../shared/bloom'
+import type { CatalogueModel } from '../shared/models'
 import type { ReleaseInfo } from '../shared/version'
 import { IPC } from '../shared/ipc'
 import { paletteFor } from '../shared/theme'
@@ -15,6 +16,8 @@ import type {
 } from '../shared/types'
 import type { AmberConnection } from './amber/connection'
 import type { ToolBridge } from './amber/tool-bridge'
+import { listModels } from './amber/catalogue'
+import { applyModel, remapKeyword } from './amber/model'
 import { applyVoice } from './amber/voice'
 import * as bloomApi from './bloom'
 import { take as takePendingDeepLink } from './bloom/deep-link'
@@ -88,6 +91,23 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
 
   ipcMain.handle(IPC.AMBER_INTERRUPT, (): boolean => amber.send({ type: 'interrupt' }))
 
+  ipcMain.handle(
+    IPC.AMBER_REMAP_MODEL,
+    (_e, keyword: string, model: string | null): boolean => {
+      if (typeof keyword !== 'string' || !keyword.trim()) return false
+      const target = typeof model === 'string' && model.trim() ? model.trim() : null
+      // No optimistic local copy: Amber owns this value and answers with a `model`
+      // frame carrying what actually took effect. Returning false when the socket is
+      // down is the honest answer — there is nowhere else to put it.
+      return remapKeyword(amber, keyword.trim().toLowerCase(), target)
+    },
+  )
+
+  ipcMain.handle(
+    IPC.AMBER_MODEL_CATALOGUE,
+    (_e, refresh?: boolean): Promise<CatalogueModel[]> => listModels(refresh === true),
+  )
+
   // --- settings -------------------------------------------------------------
 
   ipcMain.handle(IPC.SETTINGS_GET, (): Settings => getSettings())
@@ -109,6 +129,11 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
       patch.ttsInstructions !== undefined
     ) {
       applyVoice(amber, next)
+    }
+    // The brain applies to the next turn, so push it now for the same reason —
+    // saving a choice should change the reply after it, not after a reconnect.
+    if (patch.llmKeyword !== undefined) {
+      applyModel(amber, next)
     }
     // Repaint the window chrome so a reload — or the next cold start — never shows
     // the previous theme behind the renderer. The renderer restyles itself.

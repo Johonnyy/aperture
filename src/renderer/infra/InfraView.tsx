@@ -4,7 +4,7 @@ import { EXPECTED_SCHEMA, type InfraStatus, type ServerConfig } from '../../shar
 import { AppCard } from './AppCard'
 import { Catalogue } from './Catalogue'
 import { useCredentials } from './Readiness'
-import type { ReleaseInfo } from '../../shared/version'
+import { repoSlug, type ReleaseInfo } from '../../shared/version'
 import { useStore } from '../store'
 import { DnsRecords } from './Dns'
 import { Card, Chip, Field, SmallButton } from './parts'
@@ -59,11 +59,20 @@ export function InfraView({
   const [releases, setReleases] = useState<Record<string, ReleaseInfo>>({})
   const [checkingReleases, setCheckingReleases] = useState(false)
 
+  // Through a ref for the same reason as the password below: the repo field is a text
+  // input, and rebuilding this callback per keystroke would re-fire the release check.
+  const repoRef = useRef(repo)
+  repoRef.current = repo
+
   const checkReleases = useCallback(
     async (from: InfraStatus | null, force = false) => {
       const repos = [
         ...(from?.apps ?? []).map((a) => a.manifest?.release?.repo),
         ...(from?.catalogue ?? []).map((c) => c.manifest?.release?.repo),
+        // The registry ships from amber-infra's own tags and has no manifest to name a
+        // repo in, so the clone URL below is the only thing that knows where its
+        // releases come from.
+        repoSlug(repoRef.current),
       ].filter((r): r is string => Boolean(r))
       if (repos.length === 0) return
       setCheckingReleases(true)
@@ -303,6 +312,7 @@ export function InfraView({
             run={run}
             advanced={advanced}
             needsPassword={needsPassword}
+            release={releases[repoSlug(repo) ?? '']}
           />
 
           {status.warnings.length > 0 && (

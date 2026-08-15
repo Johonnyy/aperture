@@ -140,6 +140,84 @@ export interface VoiceFrame {
   locked?: true
 }
 
+/** One way of describing the model you want, and where it currently points. */
+export interface ModelKeyword {
+  /** Lowercase, no slash — `coding`, `fast`, `sql`. */
+  name: string
+  /** The OpenRouter id it resolves to right now. */
+  model: string
+  /** What it would resolve to untouched. Null for a keyword this install invented. */
+  default_model: string | null
+  /** What the keyword is *for*. Empty for a custom one. */
+  description: string
+  /** Invented on this install rather than shipped with Amber. */
+  custom: boolean
+  /** `model` differs from `default_model`, so a reset is a meaningful offer. */
+  overridden: boolean
+  /**
+   * The sync store has this row, so every other app resolves the keyword the same
+   * way. False while a change is still queued — an unreachable store is a normal
+   * state, not an error, and this is the difference between "shared" and "mine".
+   */
+  shared: boolean
+}
+
+/** How this Amber stands with the ecosystem's shared keyword table. */
+export interface ModelSyncStatus {
+  /** A sync store is configured and `AMBER_FEATURE_MODEL_SYNC` is on. */
+  enabled: boolean
+  /** ISO-8601 of the last successful reconciliation, or null. */
+  last_ok?: string | null
+  /** Why the last attempt failed, or null. Present alongside a stale `last_ok`. */
+  last_error?: string | null
+  /** Local changes not yet accepted by the store. */
+  pending?: number
+}
+
+/** Which brain answers on this connection. */
+export interface ModelSettings {
+  /** The keyword in effect — this connection's, or the server's default. */
+  keyword: string
+  /** What it resolves to. The only field that names an actual model. */
+  model: string
+  /** `AMBER_LLM_TIER`. Shown as "Amber's own choice". */
+  default_keyword: string
+  /**
+   * Whether this *connection* picked the keyword.
+   *
+   * Not cosmetic: `chosen: false` with `keyword: 'balanced'` means "following the
+   * server", and it should keep following if the box's config changes. The resolved
+   * values are identical in both states, so nothing else can tell them apart.
+   */
+  chosen: boolean
+}
+
+/** Every keyword this Amber knows. Sent so a picker needn't ship its own copy. */
+export interface ModelOptions {
+  default_keyword: string
+  keywords: ModelKeyword[]
+  /** Which keyword each kind of model call uses. Only `brain` is per-connection. */
+  roles: { brain: string; memory: string; maintenance: string }
+  /** Whether re-pointing a keyword here reaches the rest of the ecosystem. */
+  sync?: ModelSyncStatus
+}
+
+/**
+ * The brain in effect on this connection, and the catalogue behind it.
+ *
+ * Sent once right after `voice`, and again as the acknowledgment of every
+ * `set_model` — the same discipline, for the same reason: Amber validates what it is
+ * handed and drops what fails, so this frame rather than the request is the truth
+ * about which model answers the next turn. `locked` means
+ * `AMBER_FEATURE_MODEL_CONTROL` is off; show the values, disable the controls.
+ */
+export interface ModelFrame {
+  type: 'model'
+  settings: ModelSettings
+  options?: ModelOptions
+  locked?: true
+}
+
 /** Something went wrong this turn. The connection stays open. */
 export interface ErrorFrame {
   type: 'error'
@@ -156,6 +234,7 @@ export type ServerFrame =
   | MemoryFrame
   | ToolCallFrame
   | VoiceFrame
+  | ModelFrame
   | ErrorFrame
 
 // --- client -> server -------------------------------------------------------
@@ -204,6 +283,25 @@ export type ClientFrame =
       speed?: number | null
       instructions?: string | null
     }
+  /**
+   * Choose the brain, and/or say what a keyword means.
+   *
+   * Two scopes in one frame, deliberately separate. `keyword` is **this connection**
+   * — held on Amber's session like the voice, so re-send it on every `ready`; `null`
+   * hands the choice back to the server's `AMBER_LLM_TIER`. `map` is **the whole
+   * install** and outlives the socket: it is written to Amber's database and pushed
+   * to the sync store, so every app in the ecosystem resolves the keyword the same
+   * way. A `null` value in the map resets that keyword to Amber's built-in default.
+   *
+   * The map is applied before the keyword, so one frame can invent a keyword and
+   * select it. Anything invalid is dropped silently — read the `model` frame that
+   * comes back rather than assuming a value took.
+   */
+  | {
+      type: 'set_model'
+      keyword?: string | null
+      map?: Record<string, string | null>
+    }
 
 // --- narrowing helpers ------------------------------------------------------
 
@@ -216,6 +314,7 @@ const SERVER_FRAME_TYPES = new Set<ServerFrame['type']>([
   'memory',
   'tool_call',
   'voice',
+  'model',
   'error',
 ])
 

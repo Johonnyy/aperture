@@ -306,6 +306,29 @@ export const ACTIONS: Record<string, ActionDef> = {
    * different layer hash for the same tag. For one server that is fine; the moment
    * there are two, publish properly instead.
    */
+  /**
+   * Update the registry to a published tag.
+   *
+   * The gap this fills: *Update infra* is a `git pull` and changes nothing about what
+   * is running, and `ensure_sync_store` returns early on a healthy store, so re-running
+   * an install does not roll it either. The registry was the only thing on the box with
+   * no update path — reachable only by editing two files by hand, in the right order.
+   *
+   * `p.tag` is optional: without it this re-pulls and restarts the current pin, which
+   * is the "it is wedged, put it back" case. The script writes both the deployed
+   * compose file and `sync_store.image`, and only records the pin after the store comes
+   * back healthy — it reverts to the last known-good image if it does not.
+   */
+  updateSyncStore: {
+    label: 'Update the registry',
+    needsSudo: true,
+    rehearse: (p) =>
+      `bash ${script('deploy/update-sync-store.sh')}${p.tag ? ` --to ${q(p.tag)}` : ''} --dry-run`,
+    build: (p) =>
+      `bash ${script('deploy/update-sync-store.sh')}${p.tag ? ` --to ${q(p.tag)}` : ''}`,
+    timeoutMs: 10 * 60_000,
+  },
+
   buildSyncStore: {
     label: 'Build the sync-store image here',
     needsSudo: true,

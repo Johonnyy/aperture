@@ -13,6 +13,14 @@ export const IPC = {
   AMBER_SEND_TEXT: 'amber:send-text',
   AMBER_SEND_AUDIO: 'amber:send-audio',
   AMBER_INTERRUPT: 'amber:interrupt',
+  /**
+   * Say what a model keyword means. Separate from SETTINGS_SET because it is not a
+   * setting of *this machine* — Amber persists it and shares it with every app
+   * through the sync store. See `main/amber/model.ts`.
+   */
+  AMBER_REMAP_MODEL: 'amber:remap-model',
+  /** OpenRouter's public model list, to suggest ids for the field above. */
+  AMBER_MODEL_CATALOGUE: 'amber:model-catalogue',
 
   SETTINGS_GET: 'settings:get',
   SETTINGS_SET: 'settings:set',

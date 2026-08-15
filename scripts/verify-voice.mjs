@@ -41,6 +41,7 @@ const BASE = {
   playAudio: true,
   ttsVoice: '',
   ttsModel: '',
+  llmKeyword: '',
   ttsSpeed: 0,
   ttsInstructions: '',
   verboseLogging: true,

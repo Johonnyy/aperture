@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 
 import { EMPTY_BLOOM_LINK, type BloomLink, type BloomRunEvent } from '../shared/bloom'
-import type { ServerFrame, VoiceFrame } from '../shared/protocol'
+import type { ModelFrame, ServerFrame, VoiceFrame } from '../shared/protocol'
 import type {
   ApertureEvent,
   AuditEntry,
@@ -70,6 +70,15 @@ interface State {
    * doesn't support voice control".
    */
   voice: VoiceFrame | null
+  /**
+   * Which brain is answering, straight from the `model` frame.
+   *
+   * Separate from `settings.llmKeyword` for the same reason `voice` is separate from
+   * `settings.tts*`: that is a *request*, this is what Amber is actually doing. Null
+   * until the handshake lands, which the Settings page reads as "this Amber predates
+   * model control".
+   */
+  model: ModelFrame | null
   lastError: { message: string; code?: string } | null
   /** Where we stand with Bloom. Drives whether its sidebar row exists at all. */
   bloomLink: BloomLink
@@ -127,6 +136,7 @@ export const useStore = create<State>((set) => ({
   thinking: false,
   awaitingResponse: false,
   voice: null,
+  model: null,
   lastError: null,
   // Seeded from argv before first paint (see preload), then corrected by the record
   // on disk a moment later. The default matters: `unlinked` means no sidebar row, so
@@ -434,6 +444,16 @@ function reduceFrame(s: State, frame: ServerFrame): Partial<State> {
             'voice',
             `${frame.settings.voice} · ${frame.settings.model} · ${frame.settings.speed}x`,
           ),
+        ),
+      }
+
+    case 'model':
+      return {
+        // Keep the last catalogue for the same reason as `voice`: a frame that
+        // omitted it must not empty a picker mid-session.
+        model: { ...frame, options: frame.options ?? s.model?.options },
+        trace: push(
+          trace('info', 'model', `${frame.settings.keyword} → ${frame.settings.model}`),
         ),
       }
 

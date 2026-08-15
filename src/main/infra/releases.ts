@@ -22,12 +22,13 @@ import {
   type ReleaseInfo,
   SEMVER,
   compareVersions,
+  repoSlug,
   tagOf,
 } from '../../shared/version'
 
 // Re-exported so `scripts/verify-releases.mjs` can drive resolution and comparison
 // from one bundle, and so a caller in main needs only this module.
-export { compareVersions, tagOf }
+export { compareVersions, repoSlug, tagOf }
 export type { Comparison, ReleaseInfo }
 
 interface FetchLike {

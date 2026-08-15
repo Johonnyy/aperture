@@ -8,7 +8,7 @@
  *
  * `fetch` is stubbed, so this needs no network and no token.
  */
-import { compareVersions, resolveLatest, tagOf } from '../out/verify/releases.mjs'
+import { compareVersions, repoSlug, resolveLatest, tagOf } from '../out/verify/releases.mjs'
 
 let failures = 0
 function check(label, actual, expected) {
@@ -25,6 +25,18 @@ check('no tag', tagOf('ghcr.io/johonnyy/amber'), null)
 check('a registry port is not a tag', tagOf('registry:5000/amber'), null)
 check('port and tag together', tagOf('registry:5000/amber:1.2.3'), '1.2.3')
 check('null in, null out', tagOf(null), null)
+
+console.log('\nrepoSlug — the registry has no manifest, so a clone URL is all there is\n')
+check('https', repoSlug('https://github.com/Johonnyy/amber-infra.git'), 'Johonnyy/amber-infra')
+check('https without .git', repoSlug('https://github.com/Johonnyy/amber-infra'), 'Johonnyy/amber-infra')
+check('a trailing slash', repoSlug('https://github.com/Johonnyy/amber-infra/'), 'Johonnyy/amber-infra')
+check('ssh', repoSlug('git@github.com:Johonnyy/amber-infra.git'), 'Johonnyy/amber-infra')
+check('already a slug', repoSlug('Johonnyy/amber-infra'), 'Johonnyy/amber-infra')
+// A wrong slug 404s, and a 404 reads as "no releases" — a silent wrong answer where an
+// absent one is honest.
+check('a non-GitHub host is null, not a guess', repoSlug('https://gitlab.com/a/b.git'), null)
+check('a deep path is null', repoSlug('https://github.com/Johonnyy/amber-infra/tree/main'), null)
+check('empty', repoSlug(''), null)
 
 console.log('\ncompareVersions\n')
 check('behind', compareVersions('0.1.0', '0.2.0'), 'behind')

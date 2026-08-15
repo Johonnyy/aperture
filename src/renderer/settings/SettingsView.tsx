@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
+import { FALLBACK_KEYWORDS, type CatalogueModel } from '../../shared/models'
+import type { ModelKeyword } from '../../shared/protocol'
 import { THEMES, swatches, type Palette, type ThemeId } from '../../shared/theme'
 import type { Settings } from '../../shared/types'
 import { FALLBACK_VOICE_OPTIONS } from '../../shared/voice'
@@ -127,6 +129,8 @@ export function SettingsView(): React.JSX.Element {
       />
 
       <VoiceSection draft={draft} setDraft={setDraft} />
+
+      <ModelSection draft={draft} setDraft={setDraft} />
 
       <Toggle
         label="Verbose logging"
@@ -512,6 +516,232 @@ function VoiceSection({
         Applies to Amber&apos;s next reply after you save — nothing reconnects.
       </span>
     </fieldset>
+  )
+}
+
+/**
+ * Which brain answers, and what the words mean.
+ *
+ * Two settings that look like one and are emphatically not, which is why they are
+ * drawn as two blocks with a rule between them:
+ *
+ * *Answer with* is **this machine's** preference — a keyword, saved locally, re-sent
+ * on every connection, `''` meaning "whatever Amber is configured for". Same shape,
+ * same sentinel and same draft discipline as the voice controls above.
+ *
+ * *What the keywords mean* is **shared state**. It lives in Amber's database and is
+ * pushed to the sync store, so re-pointing `coding` here moves every app in the
+ * ecosystem. It therefore applies on commit rather than on Save — like the theme
+ * picker, and for a stronger reason: a draft of somebody else's state would be a
+ * change you could stage, walk away from, and never make. There is nothing local to
+ * stage. What comes back in the `model` frame is the only truth about it.
+ *
+ * The model field is free text with suggestions, never a closed list. A model
+ * published this morning has to be usable this morning; a picker limited to a
+ * fetched catalogue would reintroduce exactly the delay this feature removes.
+ */
+function ModelSection({
+  draft,
+  setDraft,
+}: {
+  draft: Settings
+  setDraft: React.Dispatch<React.SetStateAction<Settings>>
+}): React.JSX.Element {
+  const model = useStore((s) => s.model)
+  const connState = useStore((s) => s.connection.state)
+  const [catalogue, setCatalogue] = useState<CatalogueModel[]>([])
+
+  const live = Boolean(model?.options)
+  const locked = model?.locked === true
+  const effective = model?.settings
+  const keywords = model?.options?.keywords ?? FALLBACK_KEYWORDS
+  const sync = model?.options?.sync
+
+  // Suggestions only; an empty list costs nothing but a shorter dropdown.
+  useEffect(() => {
+    let alive = true
+    void window.aperture.amber.modelCatalogue().then((models) => {
+      if (alive) setCatalogue(models)
+    })
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  const field =
+    'w-full rounded-field border border-line bg-ground px-3 py-2 text-sm text-ink outline-none focus:border-accent-deep disabled:opacity-40'
+
+  const chosen = keywords.find((k) => k.name === draft.llmKeyword)
+
+  return (
+    <fieldset className="flex flex-col gap-3 border-0 p-0" disabled={locked}>
+      <legend className="text-sm">Brain</legend>
+
+      {!live && (
+        <p className="text-xs text-muted">
+          {connState === 'open' ? (
+            <>
+              This Amber never sent a model catalogue, so it is running a build from
+              before model control — update it and these will start applying. Choices
+              made here are saved and re-sent on every connection meanwhile.
+            </>
+          ) : (
+            <>
+              Not connected, so these are the keywords Amber is expected to know rather
+              than the ones it named — and what each points at is only readable from
+              Amber itself.
+            </>
+          )}
+        </p>
+      )}
+      {locked && (
+        <p className="text-xs text-muted">
+          Pinned on the server — <code>AMBER_FEATURE_MODEL_CONTROL</code> is off, so
+          Amber ignores what this app asks for. It is currently answering with{' '}
+          <strong>{effective?.keyword}</strong> (<code>{effective?.model}</code>).
+        </p>
+      )}
+
+      <label className="flex flex-col gap-1.5">
+        <span className="text-sm">Answer with</span>
+        <select
+          className={field}
+          value={draft.llmKeyword}
+          onChange={(e) => setDraft((d) => ({ ...d, llmKeyword: e.target.value }))}
+        >
+          <option value="">
+            Amber&apos;s default{effective ? ` (${effective.default_keyword})` : ''}
+          </option>
+          {keywords.map((keyword) => (
+            <option key={keyword.name} value={keyword.name}>
+              {keyword.name}
+              {keyword.description ? ` — ${keyword.description}` : ''}
+            </option>
+          ))}
+        </select>
+        <span className="text-xs text-muted">
+          {chosen?.model ? (
+            <>
+              Currently <code>{chosen.model}</code>. Applies to the next turn after you
+              save — nothing reconnects.
+            </>
+          ) : (
+            <>
+              You pick a model by describing it. What each word points at is below, and
+              is shared with every app.
+            </>
+          )}
+        </span>
+      </label>
+
+      <details className="border-t border-line pt-2">
+        <summary className="cursor-pointer text-meta text-muted">
+          What the keywords mean
+        </summary>
+
+        <div className="mt-3 flex flex-col gap-3">
+          <p className="text-xs text-muted">
+            {sync?.enabled ? (
+              <>
+                Shared with every app through the sync store, so <code>coding</code>{' '}
+                means one thing everywhere.{' '}
+                {sync.pending
+                  ? `${sync.pending} change${sync.pending === 1 ? '' : 's'} still waiting to reach it.`
+                  : sync.last_error
+                    ? `The store last refused: ${sync.last_error}`
+                    : 'Everything here is in step with it.'}
+              </>
+            ) : (
+              <>
+                Stored in Amber&apos;s own database and applied on the next turn. No
+                sync store is configured, so these stay local to this Amber rather than
+                reaching the other apps.
+              </>
+            )}
+          </p>
+
+          {live ? (
+            keywords.map((keyword) => (
+              <KeywordRow key={keyword.name} keyword={keyword} />
+            ))
+          ) : (
+            <p className="text-xs text-muted">
+              Connect to Amber to see and change what these point at.
+            </p>
+          )}
+
+          {/* One datalist for every row. Rendering a few thousand options per
+              keyword would be pointless weight, and the suggestions are identical. */}
+          <datalist id="openrouter-models">
+            {catalogue.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.name}
+              </option>
+            ))}
+          </datalist>
+        </div>
+      </details>
+    </fieldset>
+  )
+}
+
+/**
+ * One keyword, and the model it points at.
+ *
+ * Committed on blur or Enter rather than per keystroke — every commit is a write
+ * every app in the ecosystem will read, so `anthropic/c` must never be one of them.
+ * The input is re-seeded from the frame whenever Amber's answer changes, which is
+ * what makes a refused value visibly snap back instead of appearing to have worked.
+ */
+function KeywordRow({ keyword }: { keyword: ModelKeyword }): React.JSX.Element {
+  const [value, setValue] = useState(keyword.model)
+
+  useEffect(() => setValue(keyword.model), [keyword.model])
+
+  const commit = (next: string | null): void => {
+    void window.aperture.amber.remapModel(keyword.name, next)
+  }
+
+  const dirty = value.trim() !== keyword.model
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-baseline gap-2">
+        <span className="font-mono text-meta text-ink">{keyword.name}</span>
+        {keyword.overridden && (
+          <button
+            type="button"
+            onClick={() => commit(null)}
+            className="text-micro text-muted underline decoration-dotted hover:text-ink"
+          >
+            reset
+          </button>
+        )}
+        {keyword.overridden && !keyword.shared && (
+          <span className="text-micro text-muted">not shared yet</span>
+        )}
+      </div>
+      <input
+        className="w-full rounded-field border border-line bg-ground px-3 py-1.5 font-mono text-meta text-ink outline-none focus:border-accent-deep"
+        list="openrouter-models"
+        value={value}
+        spellCheck={false}
+        placeholder="vendor/model"
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={() => dirty && commit(value.trim() || null)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            commit(value.trim() || null)
+          } else if (e.key === 'Escape') {
+            setValue(keyword.model)
+          }
+        }}
+      />
+      {keyword.description && (
+        <span className="text-micro text-muted">{keyword.description}</span>
+      )}
+    </div>
   )
 }
 

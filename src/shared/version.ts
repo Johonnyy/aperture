@@ -39,6 +39,29 @@ export function tagOf(imageRef: string | null | undefined): string | null {
   return tag || null
 }
 
+/**
+ * A clone URL as GitHub's `owner/repo`, which is what the release check takes.
+ *
+ * The registry is published from amber-infra's own tags and has no manifest to declare
+ * a repo in — `sync-store/` is a directory in that repo, not an app with a checkout. So
+ * the only name available is the clone URL the Servers tab already holds for
+ * bootstrapping, and this is the one line that turns one into the other.
+ *
+ * Null for anything that is not recognisably a GitHub repo, because a wrong slug
+ * resolves to a 404 that reads as "no releases" — a silent wrong answer where an
+ * absent one would have been honest.
+ */
+export function repoSlug(url: string | null | undefined): string | null {
+  const raw = (url ?? '').trim()
+  if (!raw) return null
+  // `owner/repo` already.
+  if (/^[\w.-]+\/[\w.-]+$/.test(raw)) return raw.replace(/\.git$/, '')
+  const match =
+    /^https?:\/\/github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(raw) ??
+    /^git@github\.com:([\w.-]+)\/([\w.-]+?)(?:\.git)?$/.exec(raw)
+  return match ? `${match[1]}/${match[2]}` : null
+}
+
 /** Numeric-only semver, which is what `type=semver` in release.yml publishes. */
 export const SEMVER = /^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/
 
