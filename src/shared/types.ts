@@ -167,6 +167,24 @@ export interface Settings {
   /** Play Amber's synthesized speech. Off is useful when working in a shared space. */
   playAudio: boolean
   /**
+   * How Amber should sound, sent as a `set_voice` patch on every connect.
+   *
+   * The empty string and `0` mean **"don't override"** — that key is left out of the
+   * patch entirely and Amber's own `AMBER_TTS_*` default stands. That sentinel is the
+   * whole design: a fresh Aperture must not silently overwrite a voice someone chose
+   * on the box, and "Use Amber's settings" has to be a state you can return to, not
+   * just a value that happens to match today.
+   *
+   * The `voice` frame reports what is actually in effect, which is what the UI shows;
+   * these four are only ever a request.
+   */
+  ttsVoice: string
+  ttsModel: string
+  /** 0.25–4.0, or 0 for Amber's default. 1.0 is unhurried; ~1.2 is conversational. */
+  ttsSpeed: number
+  /** Prose direction ("warm, brisk"). Only the `gpt-4o-*` models act on it. */
+  ttsInstructions: string
+  /**
    * Include low-level detail in operation logs: exact commands, raw output, host
    * key fingerprints, auth methods offered. On by default — this is a tool for
    * seeing what happened, and the quiet version is the one you have to opt into.
@@ -215,6 +233,10 @@ export const DEFAULT_SETTINGS: Settings = {
   autoReconnect: true,
   confirmBeforeExec: true,
   playAudio: true,
+  ttsVoice: '',
+  ttsModel: '',
+  ttsSpeed: 0,
+  ttsInstructions: '',
   verboseLogging: true,
   advancedMode: false,
   localEcho: 'auto',

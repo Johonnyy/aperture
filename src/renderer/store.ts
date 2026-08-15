@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 
 import { EMPTY_BLOOM_LINK, type BloomLink, type BloomRunEvent } from '../shared/bloom'
-import type { ServerFrame } from '../shared/protocol'
+import type { ServerFrame, VoiceFrame } from '../shared/protocol'
 import type {
   ApertureEvent,
   AuditEntry,
@@ -61,6 +61,15 @@ interface State {
   thinking: boolean
   /** Amber asked something and wants an answer — keep the mic open. */
   awaitingResponse: boolean
+  /**
+   * How Amber is actually speaking, straight from the `voice` frame.
+   *
+   * Deliberately separate from `settings.tts*`, which are only ever a *request*:
+   * Amber clamps and validates, and an old build may not know the frame at all. Null
+   * until the handshake lands, which is what the Settings page reads as "this Amber
+   * doesn't support voice control".
+   */
+  voice: VoiceFrame | null
   lastError: { message: string; code?: string } | null
   /** Where we stand with Bloom. Drives whether its sidebar row exists at all. */
   bloomLink: BloomLink
@@ -117,6 +126,7 @@ export const useStore = create<State>((set) => ({
   ops: {},
   thinking: false,
   awaitingResponse: false,
+  voice: null,
   lastError: null,
   // Seeded from argv before first paint (see preload), then corrected by the record
   // on disk a moment later. The default matters: `unlinked` means no sidebar row, so
@@ -411,6 +421,20 @@ function reduceFrame(s: State, frame: ServerFrame): Partial<State> {
     case 'tool_call':
       return {
         trace: push(trace('info', `tool_call ${frame.name}`, JSON.stringify(frame.input))),
+      }
+
+    case 'voice':
+      return {
+        // The options block only rides on some of these frames in principle; keep the
+        // last catalogue we were given so a picker can't empty itself mid-session.
+        voice: { ...frame, options: frame.options ?? s.voice?.options },
+        trace: push(
+          trace(
+            'info',
+            'voice',
+            `${frame.settings.voice} · ${frame.settings.model} · ${frame.settings.speed}x`,
+          ),
+        ),
       }
 
     case 'error':

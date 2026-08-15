@@ -2,6 +2,7 @@ import { useState } from 'react'
 
 import { THEMES, swatches, type Palette, type ThemeId } from '../../shared/theme'
 import type { Settings } from '../../shared/types'
+import { FALLBACK_VOICE_OPTIONS } from '../../shared/voice'
 import { useStore } from '../store'
 import { applyTheme } from '../theme'
 
@@ -124,6 +125,8 @@ export function SettingsView(): React.JSX.Element {
         checked={draft.playAudio}
         onChange={(playAudio) => setDraft({ ...draft, playAudio })}
       />
+
+      <VoiceSection draft={draft} setDraft={setDraft} />
 
       <Toggle
         label="Verbose logging"
@@ -309,6 +312,209 @@ function ThemeCard({
   )
 }
 
+/**
+ * How Amber sounds.
+ *
+ * Two sources of truth meet here and must not be conflated. `draft.tts*` is what
+ * this machine is *asking for*, with `''`/`0` meaning "whatever you're configured
+ * for". `voice` is the `voice` frame — what Amber is *actually* doing, after it has
+ * validated and clamped the request. Every control is seeded from the effective
+ * value and writes to the request, so "Amber's default" stays a real, reachable
+ * state rather than a value that merely happens to match today.
+ *
+ * Amber is the authority on what it accepts: the lists come off the wire in
+ * `options`, so a voice added server-side appears here without a release. When that
+ * hasn't arrived — no connection yet, or an Amber built before voice control — the
+ * pickers fall back to `FALLBACK_VOICE_OPTIONS` rather than going dead. Disabling
+ * them was the wrong instinct: these settings are persisted locally and re-sent on
+ * every `ready`, so choosing one while disconnected is a perfectly coherent thing to
+ * do, and Amber validates whatever it is handed anyway. A settings page you cannot
+ * use to change a setting is worse than a list that might be one voice out of date.
+ */
+function VoiceSection({
+  draft,
+  setDraft,
+}: {
+  draft: Settings
+  setDraft: React.Dispatch<React.SetStateAction<Settings>>
+}): React.JSX.Element {
+  const voice = useStore((s) => s.voice)
+  const connState = useStore((s) => s.connection.state)
+  const effective = voice?.settings
+  const locked = voice?.locked === true
+  /** True when the lists below are Amber's own rather than the built-in fallback. */
+  const live = Boolean(voice?.options)
+  const options = voice?.options ?? FALLBACK_VOICE_OPTIONS
+
+  const field =
+    'w-full rounded-field border border-line bg-ground px-3 py-2 text-sm text-ink outline-none focus:border-accent-deep disabled:opacity-40'
+
+  // The model that will actually be used — the request if there is one, otherwise
+  // whatever Amber reports. It decides whether the speed control is real or a hint.
+  // An unknown model (nothing chosen, nothing reported) is assumed to take speed
+  // natively: that is true of the default and of both older models, and warning
+  // about a quirk of a model nobody has selected would be noise.
+  const model = draft.ttsModel || effective?.model || ''
+  const nativeSpeed = !model || options.native_speed_models.includes(model)
+  const takesInstructions = options.instruction_models.includes(model)
+
+  const [min, max] = options.speed_range
+  const speed = draft.ttsSpeed > 0 ? draft.ttsSpeed : (effective?.speed ?? 1)
+  const overridden =
+    Boolean(draft.ttsVoice || draft.ttsModel || draft.ttsInstructions) || draft.ttsSpeed > 0
+
+  return (
+    <fieldset className="flex flex-col gap-3 border-0 p-0" disabled={locked}>
+      <legend className="text-sm">Voice</legend>
+
+      {!live && (
+        <p className="text-xs text-muted">
+          {connState === 'open' ? (
+            <>
+              This Amber never sent its voice catalogue, so it is running a build from
+              before voice control — update it and these will start applying. Choices
+              made here are saved and re-sent on every connection meanwhile.
+            </>
+          ) : (
+            <>
+              Not connected, so these are the voices Amber is expected to accept rather
+              than the list it named. They are saved locally and sent as soon as it
+              answers.
+            </>
+          )}
+        </p>
+      )}
+      {locked && (
+        <p className="text-xs text-muted">
+          Pinned on the server — <code>AMBER_FEATURE_VOICE_CONTROL</code> is off, so
+          Amber ignores what this app asks for. It is currently speaking as{' '}
+          <strong>{effective?.voice}</strong> at {effective?.speed}×.
+        </p>
+      )}
+
+      <label className="flex flex-col gap-1.5">
+        <span className="text-sm">Speaking rate</span>
+        <div className="flex items-center gap-3">
+          <input
+            type="range"
+            min={min}
+            max={Math.min(max, 2)}
+            step={0.05}
+            value={speed}
+            onChange={(e) => setDraft((d) => ({ ...d, ttsSpeed: Number(e.target.value) }))}
+            className="h-1 flex-1 accent-accent"
+          />
+          <span className="w-14 text-right font-mono text-meta text-muted">
+            {speed.toFixed(2)}×
+          </span>
+        </div>
+        <span className="text-xs text-muted">
+          {draft.ttsSpeed > 0 ? (
+            <>
+              1.0× is the API default and is noticeably unhurried; 1.15–1.3× is where
+              most people land.{' '}
+              {!nativeSpeed && (
+                <>
+                  <code>{model}</code> has no speed parameter, so Amber turns this into
+                  a pacing instruction — it works, but less precisely.
+                </>
+              )}
+            </>
+          ) : (
+            <>Using Amber&apos;s own setting. Move the slider to override it here.</>
+          )}
+        </span>
+      </label>
+
+      <label className="flex flex-col gap-1.5">
+        <span className="text-sm">Voice</span>
+        <select
+          className={field}
+          value={draft.ttsVoice}
+          onChange={(e) => setDraft((d) => ({ ...d, ttsVoice: e.target.value }))}
+        >
+          <option value="">
+            Amber&apos;s default{effective ? ` (${effective.voice})` : ''}
+          </option>
+          {options?.voices.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="flex flex-col gap-1.5">
+        <span className="text-sm">Model</span>
+        <select
+          className={field}
+          value={draft.ttsModel}
+          onChange={(e) => setDraft((d) => ({ ...d, ttsModel: e.target.value }))}
+        >
+          <option value="">
+            Amber&apos;s default{effective ? ` (${effective.model})` : ''}
+          </option>
+          {options?.models.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+        <span className="text-xs text-muted">
+          <code>tts-1</code> is the fastest to first sound, which is what a
+          conversation notices most. <code>gpt-4o-mini-tts</code> is a better voice and
+          takes direction below, at some latency.
+        </span>
+      </label>
+
+      <label className="flex flex-col gap-1.5">
+        <span className="text-sm">Direction</span>
+        <input
+          className={field}
+          value={draft.ttsInstructions}
+          placeholder="warm and brisk, never sing-song"
+          onChange={(e) => setDraft((d) => ({ ...d, ttsInstructions: e.target.value }))}
+        />
+        <span className="text-xs text-muted">
+          {takesInstructions ? (
+            <>How the words should be delivered — tone, pace, attitude.</>
+          ) : (
+            <>
+              Only the <code>gpt-4o-*</code> models act on this. With{' '}
+              <code>{model || 'the current model'}</code> selected it is saved but not
+              sent.
+            </>
+          )}
+        </span>
+      </label>
+
+      {overridden && (
+        <div>
+          <button
+            type="button"
+            onClick={() =>
+              setDraft((d) => ({
+                ...d,
+                ttsVoice: '',
+                ttsModel: '',
+                ttsSpeed: 0,
+                ttsInstructions: '',
+              }))
+            }
+            className="rounded-field border border-line px-3 py-1.5 text-sm text-muted transition hover:border-accent-deep hover:text-ink"
+          >
+            Use Amber&apos;s settings
+          </button>
+        </div>
+      )}
+
+      <span className="text-xs text-muted">
+        Applies to Amber&apos;s next reply after you save — nothing reconnects.
+      </span>
+    </fieldset>
+  )
+}
+
 function Toggle({
   label,
   hint,
@@ -347,6 +553,11 @@ function Toggle({
  * The key goes straight into the OS keychain in main and never comes back across
  * the bridge, so there is nothing to display and no way to reveal it — only to
  * replace it or forget it.
+ *
+ * Once something *is* linked the form folds away behind a disclosure. It used to
+ * render unconditionally, which put an empty address-and-key form directly under the
+ * live link — reading as Bloom's configuration living in two places, when it is one
+ * link reached two ways.
  */
 function BloomSection(): React.JSX.Element {
   const link = useStore((s) => s.bloomLink)
@@ -378,30 +589,8 @@ function BloomSection(): React.JSX.Element {
     setBloomLink(await window.aperture.bloom.unlink())
   }
 
-  return (
-    <fieldset className="flex flex-col gap-3 border-0 p-0">
-      <legend className="text-sm">Bloom</legend>
-
-      {link.state === 'unlinked' ? (
-        <p className="text-xs text-muted">
-          Not linked. The usual way is the Servers tab, which reads the key off the
-          box for you — this is for a local instance, or one no server reaches.
-        </p>
-      ) : (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="min-w-0 flex-1 truncate font-mono text-meta text-muted">
-            {link.baseUrl} · {link.state}
-          </span>
-          <button
-            type="button"
-            onClick={() => void unlink()}
-            className="rounded-field border border-line px-3 py-1.5 text-sm text-muted transition hover:border-danger/50 hover:text-danger"
-          >
-            Forget
-          </button>
-        </div>
-      )}
-
+  const form = (
+    <div className="flex flex-col gap-3">
       {error && <p className="text-xs text-danger">{error}</p>}
 
       <label className="flex flex-col gap-1.5">
@@ -443,6 +632,50 @@ function BloomSection(): React.JSX.Element {
           {busy ? 'Linking…' : 'Link Bloom'}
         </button>
       </div>
+    </div>
+  )
+
+  return (
+    <fieldset className="flex flex-col gap-3 border-0 p-0">
+      <legend className="text-sm">Bloom</legend>
+
+      {link.state === 'unlinked' ? (
+        <>
+          <p className="text-xs text-muted">
+            Not linked. The usual way is the Servers tab, which reads the key off the
+            box for you — this is for a local instance, or one no server reaches.
+          </p>
+          {form}
+        </>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="min-w-0 flex-1 truncate font-mono text-meta text-muted">
+              {link.baseUrl} · {link.state}
+            </span>
+            <button
+              type="button"
+              onClick={() => void unlink()}
+              className="rounded-field border border-line px-3 py-1.5 text-sm text-muted transition hover:border-danger/50 hover:text-danger"
+            >
+              Forget
+            </button>
+          </div>
+
+          <details className="border-t border-line pt-2">
+            <summary className="cursor-pointer text-meta text-muted">
+              Link a different Bloom manually
+            </summary>
+            <div className="mt-3 flex flex-col gap-3">
+              <p className="text-xs text-muted">
+                For a local instance, or one no configured server reaches. Replaces the
+                link above — there is only ever one.
+              </p>
+              {form}
+            </div>
+          </details>
+        </>
+      )}
     </fieldset>
   )
 }

@@ -99,6 +99,47 @@ export interface ToolCallFrame {
   input: Record<string, unknown>
 }
 
+/** How Amber sounds. Every field is the *effective* value, post-validation. */
+export interface VoiceSettings {
+  model: string
+  voice: string
+  /** Container of the synthesized bytes — the same value `audio_chunk` carries. */
+  format: string
+  /** 0.25–4.0. See `nativeSpeedModels` for what it means on a given model. */
+  speed: number
+  /** Prose direction for the voice. Only the `gpt-4o-*` models act on it. */
+  instructions: string
+}
+
+/** What this Amber accepts. Sent so a picker needn't ship its own copy. */
+export interface VoiceOptions {
+  voices: string[]
+  models: string[]
+  formats: string[]
+  /** `[min, max]`. */
+  speed_range: [number, number]
+  /** Models where `speed` reaches the API; elsewhere it becomes a pacing instruction. */
+  native_speed_models: string[]
+  /** Models that accept `instructions` at all. */
+  instruction_models: string[]
+}
+
+/**
+ * The voice settings in effect on this connection.
+ *
+ * Sent once immediately after `ready`, and again as the acknowledgment of every
+ * `set_voice`. It is the *only* truth about what the next sentence will sound like:
+ * Amber validates and clamps a patch, so echoing back what you sent would be a lie
+ * whenever it didn't survive. `locked` means `AMBER_FEATURE_VOICE_CONTROL` is off
+ * and `set_voice` is being ignored — show the values, disable the controls.
+ */
+export interface VoiceFrame {
+  type: 'voice'
+  settings: VoiceSettings
+  options?: VoiceOptions
+  locked?: true
+}
+
 /** Something went wrong this turn. The connection stays open. */
 export interface ErrorFrame {
   type: 'error'
@@ -114,6 +155,7 @@ export type ServerFrame =
   | TurnCompleteFrame
   | MemoryFrame
   | ToolCallFrame
+  | VoiceFrame
   | ErrorFrame
 
 // --- client -> server -------------------------------------------------------
@@ -146,6 +188,22 @@ export type ClientFrame =
    *  would reach the model as a Python dict repr). Must arrive within
    *  `client_tool_timeout_s` (30s) — after that it is discarded with no notice. */
   | { type: 'tool_result'; id: string; content: string; is_error?: boolean }
+  /**
+   * Change how Amber sounds, for this connection only. A **patch**: send just the
+   * keys you want to change, and `null` for a field that should go back to the
+   * server's own configured default. Anything Amber doesn't recognise is dropped
+   * silently and out-of-range values are clamped, so never assume it took — read the
+   * `voice` frame that comes back. Held on the session, not persisted, so re-send on
+   * every `ready`, like `register_tools`.
+   */
+  | {
+      type: 'set_voice'
+      voice?: string | null
+      model?: string | null
+      format?: string | null
+      speed?: number | null
+      instructions?: string | null
+    }
 
 // --- narrowing helpers ------------------------------------------------------
 
@@ -157,6 +215,7 @@ const SERVER_FRAME_TYPES = new Set<ServerFrame['type']>([
   'turn_complete',
   'memory',
   'tool_call',
+  'voice',
   'error',
 ])
 

@@ -15,6 +15,7 @@ import type {
 } from '../shared/types'
 import type { AmberConnection } from './amber/connection'
 import type { ToolBridge } from './amber/tool-bridge'
+import { applyVoice } from './amber/voice'
 import * as bloomApi from './bloom'
 import { take as takePendingDeepLink } from './bloom/deep-link'
 import * as bloom from './bloom/link'
@@ -97,6 +98,18 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
     // time, so push it now — otherwise toggling it wouldn't take effect until the
     // next manual reconnect. URL and token only matter on the next dial.
     amber.updateOptions({ autoReconnect: next.autoReconnect })
+    // The voice applies to the next sentence Amber synthesizes, so push it now
+    // rather than on the next dial — the whole point of the controls is hearing the
+    // change on the reply after you save. A no-op when the socket is down; `ready`
+    // re-sends it.
+    if (
+      patch.ttsVoice !== undefined ||
+      patch.ttsModel !== undefined ||
+      patch.ttsSpeed !== undefined ||
+      patch.ttsInstructions !== undefined
+    ) {
+      applyVoice(amber, next)
+    }
     // Repaint the window chrome so a reload — or the next cold start — never shows
     // the previous theme behind the renderer. The renderer restyles itself.
     if (patch.theme) {
