@@ -4,8 +4,9 @@ import type {
   AgentConfig,
   AgentConfigInput,
   BloomErrorCode,
-  ConnectionInfo,
-  ProviderInfo,
+  Connection,
+  ConnectionKinds,
+  ProbeResult,
   RunSummary,
   RunTrace,
   UsageReport,
@@ -140,13 +141,69 @@ export const runTrace = (
   after: number,
 ): Promise<Result<RunTrace | null>> => call(emit, (t) => api.runTrace(t, agentId, runId, after))
 
-// --- connected accounts -----------------------------------------------------
+// --- connections -------------------------------------------------------------
+//
+// A connection is a library entry, not an agent's possession: everything except
+// the last two is global, and those two attach and detach rather than create and
+// destroy. Deleting an agent takes none of this with it.
 
-export const listProviders = (emit: Emit): Promise<Result<ProviderInfo[]>> =>
-  call(emit, (t) => api.listProviders(t))
+export const connectionKinds = (emit: Emit): Promise<Result<ConnectionKinds>> =>
+  call(emit, (t) => api.connectionKinds(t))
 
-export const listConnections = (emit: Emit, agentId: string): Promise<Result<ConnectionInfo[]>> =>
-  call(emit, (t) => api.listConnections(t, agentId))
+export const listConnections = (
+  emit: Emit,
+  filters: { kind?: string; provider?: string; status?: string } = {},
+): Promise<Result<Connection[]>> => call(emit, (t) => api.listConnections(t, filters))
+
+export const createConnection = (
+  emit: Emit,
+  draft: Record<string, unknown>,
+): Promise<Result<Connection | null>> => call(emit, (t) => api.createConnection(t, draft))
+
+export const updateConnection = (
+  emit: Emit,
+  connectionId: string,
+  patch: Record<string, unknown>,
+): Promise<Result<Connection | null>> =>
+  call(emit, (t) => api.updateConnection(t, connectionId, patch))
+
+export const deleteConnection = (
+  emit: Emit,
+  connectionId: string,
+  force = false,
+): Promise<Result<void>> => call(emit, (t) => api.deleteConnection(t, connectionId, force))
+
+export const setConnectionSecret = (
+  emit: Emit,
+  connectionId: string,
+  body: { secret?: string; client_secret?: string },
+): Promise<Result<Connection | null>> =>
+  call(emit, (t) => api.setConnectionSecret(t, connectionId, body))
+
+export const revokeConnection = (
+  emit: Emit,
+  connectionId: string,
+): Promise<Result<Connection | null>> => call(emit, (t) => api.revokeConnection(t, connectionId))
+
+export const testConnection = (
+  emit: Emit,
+  connectionId: string,
+): Promise<Result<ProbeResult>> => call(emit, (t) => api.testConnection(t, connectionId))
+
+export const agentConnections = (emit: Emit, agentId: string): Promise<Result<Connection[]>> =>
+  call(emit, (t) => api.agentConnections(t, agentId))
+
+export const attachConnection = (
+  emit: Emit,
+  agentId: string,
+  connectionId: string,
+): Promise<Result<Connection[]>> => call(emit, (t) => api.attachConnection(t, agentId, connectionId))
+
+export const detachConnection = (
+  emit: Emit,
+  agentId: string,
+  connectionId: string,
+): Promise<Result<void>> => call(emit, (t) => api.detachConnection(t, agentId, connectionId))
 
 /**
  * Begin an OAuth flow and hand the browser the authorize URL.
@@ -154,14 +211,15 @@ export const listConnections = (emit: Emit, agentId: string): Promise<Result<Con
  * `shell.openExternal`, never a `BrowserWindow`: providers increasingly refuse
  * embedded webviews outright, and the system browser already has the user's session.
  * The URL is opened from main so the renderer never has to be trusted with it.
+ *
+ * Scoped to a *connection* now, not an agent: one approval, attachable anywhere.
  */
 export async function startOAuth(
   emit: Emit,
-  agentId: string,
-  provider: string,
+  connectionId: string,
   scopes?: string[],
 ): Promise<Result<{ opened: boolean }>> {
-  const started = await call(emit, (t) => api.startOAuth(t, agentId, provider, scopes))
+  const started = await call(emit, (t) => api.startOAuth(t, connectionId, scopes))
   if (!started.ok) return started
   const url = started.value?.authorizeUrl
   if (!url) {
@@ -170,12 +228,6 @@ export async function startOAuth(
   await shell.openExternal(url)
   return { ok: true, value: { opened: true } }
 }
-
-export const disconnectProvider = (
-  emit: Emit,
-  agentId: string,
-  provider: string,
-): Promise<Result<void>> => call(emit, (t) => api.disconnectProvider(t, agentId, provider))
 
 // --- usage ------------------------------------------------------------------
 

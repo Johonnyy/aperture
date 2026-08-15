@@ -5,6 +5,7 @@ import { SmallButton } from '../infra/parts'
 import { useStore } from '../store'
 import { AgentEditor } from './AgentEditor'
 import { AgentList } from './AgentList'
+import { ConnectionLibrary } from './ConnectionLibrary'
 import { Connections } from './Connections'
 import { RunHistory } from './RunHistory'
 import { TestRun } from './TestRun'
@@ -23,13 +24,23 @@ import { Usage } from './Usage'
  * from the sidebar, because a tab that disappears takes the fix with it.
  */
 
-type Tab = 'agents' | 'activity' | 'usage'
+type Tab = 'agents' | 'connections' | 'activity' | 'usage'
+
+/**
+ * The sections of one agent.
+ *
+ * Everything below the editor used to be stacked on a single scrolling page, which
+ * was fine while there were three cards and stopped being fine once Connections
+ * grew a picker. Settings stays first because a new agent lands there.
+ */
+type DetailTab = 'settings' | 'connections' | 'test' | 'runs'
 
 export function BloomView(): React.JSX.Element {
   const link = useStore((s) => s.bloomLink)
   const setBloomLink = useStore((s) => s.setBloomLink)
 
   const [tab, setTab] = useState<Tab>('agents')
+  const [detail, setDetail] = useState<DetailTab>('settings')
   const [agents, setAgents] = useState<AgentConfig[]>([])
   const [editing, setEditing] = useState<AgentConfig | 'new' | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -85,6 +96,9 @@ export function BloomView(): React.JSX.Element {
         <TabButton active={tab === 'agents'} onClick={() => setTab('agents')}>
           Agents
         </TabButton>
+        <TabButton active={tab === 'connections'} onClick={() => setTab('connections')}>
+          Connections
+        </TabButton>
         <TabButton active={tab === 'activity'} onClick={() => setTab('activity')}>
           Activity
         </TabButton>
@@ -96,26 +110,48 @@ export function BloomView(): React.JSX.Element {
       {tab === 'agents' &&
         (editing ? (
           <>
-            <AgentEditor
-              agent={editing === 'new' ? null : editing}
-              onClose={() => setEditing(null)}
-              onSaved={() => {
-                setEditing(null)
-                void refresh()
-              }}
-            />
-            {/* Only for an agent that exists: connecting an account and running a
-                task both need an id, and a draft has none yet. */}
+            {/* The strip only appears for an agent that exists: connecting an
+                account and running a task both need an id, and a draft has none
+                yet. A new agent is one form, and that is the whole point of it. */}
             {editing !== 'new' && (
-              <>
-                <Connections agent={editing} />
-                <TestRun agent={editing} />
-                <div className="rounded-panel border border-line bg-raised/50 p-3">
-                  <h3 className="mb-2 text-sm font-medium">Recent runs</h3>
-                  <RunHistory agentId={editing.id} />
-                </div>
-              </>
+              <div className="flex shrink-0 items-center gap-1">
+                <TabButton active={detail === 'settings'} onClick={() => setDetail('settings')}>
+                  Settings
+                </TabButton>
+                <TabButton
+                  active={detail === 'connections'}
+                  onClick={() => setDetail('connections')}
+                >
+                  Connections
+                  {editing.connections.length > 0 && (
+                    <span className="ml-1.5 text-micro text-muted">
+                      {editing.connections.length}
+                    </span>
+                  )}
+                </TabButton>
+                <TabButton active={detail === 'test'} onClick={() => setDetail('test')}>
+                  Test run
+                </TabButton>
+                <TabButton active={detail === 'runs'} onClick={() => setDetail('runs')}>
+                  Runs
+                </TabButton>
+              </div>
             )}
+
+            {(editing === 'new' || detail === 'settings') && (
+              <AgentEditor
+                agent={editing === 'new' ? null : editing}
+                onClose={() => setEditing(null)}
+                onSaved={() => {
+                  setEditing(null)
+                  void refresh()
+                }}
+              />
+            )}
+
+            {editing !== 'new' && detail === 'connections' && <Connections agent={editing} />}
+            {editing !== 'new' && detail === 'test' && <TestRun agent={editing} />}
+            {editing !== 'new' && detail === 'runs' && <RunHistory agentId={editing.id} />}
           </>
         ) : (
           <AgentList
@@ -123,10 +159,14 @@ export function BloomView(): React.JSX.Element {
             loading={loading}
             onRefresh={() => void refresh()}
             onNew={() => setEditing('new')}
-            onEdit={setEditing}
+            onEdit={(agent) => {
+              setDetail('settings')
+              setEditing(agent)
+            }}
           />
         ))}
 
+      {tab === 'connections' && <ConnectionLibrary />}
       {tab === 'activity' && <RunHistory />}
       {tab === 'usage' && <Usage />}
     </section>

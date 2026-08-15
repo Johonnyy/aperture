@@ -2,9 +2,10 @@ import type {
   AgentConfig,
   AgentConfigInput,
   BloomErrorCode,
-  ConnectionInfo,
+  Connection,
+  ConnectionKinds,
   OAuthStart,
-  ProviderInfo,
+  ProbeResult,
   RunSummary,
   RunTrace,
   TestRunStarted,
@@ -12,10 +13,14 @@ import type {
 } from '../../shared/bloom'
 import {
   fromAgentInput,
+  fromConnectionDraft,
   toAgentConfig,
   toAgentConfigs,
+  toConnection,
+  toConnectionKinds,
   toConnections,
-  toProviders,
+  toOAuthStart,
+  toProbeResult,
   toRunEvents,
   toRunSummaries,
   toRunSummary,
@@ -351,53 +356,144 @@ export async function runTrace(
   })
 }
 
-export async function listProviders(target: BloomTarget): Promise<BloomResult<ProviderInfo[]>> {
-  return map(await request<unknown>(target, '/admin/oauth/providers'), toProviders)
+// --- connections -------------------------------------------------------------
+//
+// The library is global: these are not scoped to an agent. Only the last two are,
+// and they attach and detach rather than create and destroy.
+
+export async function connectionKinds(
+  target: BloomTarget,
+): Promise<BloomResult<ConnectionKinds>> {
+  return map(await request<unknown>(target, '/admin/connections/kinds'), toConnectionKinds)
 }
 
 export async function listConnections(
   target: BloomTarget,
-  agentId: string,
-): Promise<BloomResult<ConnectionInfo[]>> {
+  filters: { kind?: string; provider?: string; status?: string } = {},
+): Promise<BloomResult<Connection[]>> {
+  const result = await request<unknown>(target, '/admin/connections', { query: filters })
+  return map(result, toConnections)
+}
+
+export async function createConnection(
+  target: BloomTarget,
+  draft: Record<string, unknown>,
+): Promise<BloomResult<Connection | null>> {
+  const result = await request<unknown>(target, '/admin/connections', {
+    method: 'POST',
+    body: fromConnectionDraft(draft),
+  })
+  return map(result, toConnection)
+}
+
+export async function updateConnection(
+  target: BloomTarget,
+  connectionId: string,
+  patch: Record<string, unknown>,
+): Promise<BloomResult<Connection | null>> {
   const result = await request<unknown>(
     target,
-    `/admin/agents/${encodeURIComponent(agentId)}/oauth`,
+    `/admin/connections/${encodeURIComponent(connectionId)}`,
+    { method: 'PATCH', body: patch },
   )
-  return map(result, toConnections)
+  return map(result, toConnection)
+}
+
+export async function deleteConnection(
+  target: BloomTarget,
+  connectionId: string,
+  force = false,
+): Promise<BloomResult<void>> {
+  return request<void>(target, `/admin/connections/${encodeURIComponent(connectionId)}`, {
+    method: 'DELETE',
+    // Without this a still-attached connection answers 409 naming the agents that
+    // would lose it — which the UI renders as a confirmation, not an error.
+    query: force ? { force: 'true' } : {},
+  })
+}
+
+export async function setConnectionSecret(
+  target: BloomTarget,
+  connectionId: string,
+  body: { secret?: string; client_secret?: string },
+): Promise<BloomResult<Connection | null>> {
+  const result = await request<unknown>(
+    target,
+    `/admin/connections/${encodeURIComponent(connectionId)}/secret`,
+    { method: 'POST', body },
+  )
+  return map(result, toConnection)
+}
+
+export async function revokeConnection(
+  target: BloomTarget,
+  connectionId: string,
+): Promise<BloomResult<Connection | null>> {
+  const result = await request<unknown>(
+    target,
+    `/admin/connections/${encodeURIComponent(connectionId)}/revoke`,
+    { method: 'POST', body: {} },
+  )
+  return map(result, toConnection)
+}
+
+export async function testConnection(
+  target: BloomTarget,
+  connectionId: string,
+): Promise<BloomResult<ProbeResult>> {
+  const result = await request<unknown>(
+    target,
+    `/admin/connections/${encodeURIComponent(connectionId)}/test`,
+    { method: 'POST', body: {} },
+  )
+  return map(result, toProbeResult)
 }
 
 export async function startOAuth(
   target: BloomTarget,
-  agentId: string,
-  provider: string,
+  connectionId: string,
   scopes?: string[],
 ): Promise<BloomResult<OAuthStart | null>> {
-  const result = await request<Record<string, unknown>>(
+  const result = await request<unknown>(
     target,
-    `/admin/agents/${encodeURIComponent(agentId)}/oauth/${encodeURIComponent(provider)}/start`,
+    `/admin/connections/${encodeURIComponent(connectionId)}/oauth/start`,
     { method: 'POST', body: scopes ? { scopes } : {} },
   )
-  return map(result, (value) =>
-    value
-      ? {
-          authorizeUrl: String(value.authorize_url ?? ''),
-          state: String(value.state ?? ''),
-          expiresAt: String(value.expires_at ?? ''),
-          scopes: Array.isArray(value.scopes) ? (value.scopes as string[]) : [],
-          redirectUri: String(value.redirect_uri ?? ''),
-        }
-      : null,
-  )
+  return map(result, toOAuthStart)
 }
 
-export async function disconnectProvider(
+export async function agentConnections(
   target: BloomTarget,
   agentId: string,
-  provider: string,
+): Promise<BloomResult<Connection[]>> {
+  const result = await request<unknown>(
+    target,
+    `/admin/agents/${encodeURIComponent(agentId)}/connections`,
+  )
+  return map(result, toConnections)
+}
+
+export async function attachConnection(
+  target: BloomTarget,
+  agentId: string,
+  connectionId: string,
+): Promise<BloomResult<Connection[]>> {
+  const result = await request<unknown>(
+    target,
+    `/admin/agents/${encodeURIComponent(agentId)}/connections`,
+    { method: 'POST', body: { connection_id: connectionId } },
+  )
+  return map(result, toConnections)
+}
+
+export async function detachConnection(
+  target: BloomTarget,
+  agentId: string,
+  connectionId: string,
 ): Promise<BloomResult<void>> {
   return request<void>(
     target,
-    `/admin/agents/${encodeURIComponent(agentId)}/oauth/${encodeURIComponent(provider)}`,
+    `/admin/agents/${encodeURIComponent(agentId)}/connections/${encodeURIComponent(connectionId)}`,
     { method: 'DELETE' },
   )
 }

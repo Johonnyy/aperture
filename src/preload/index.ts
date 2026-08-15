@@ -5,8 +5,10 @@ import type {
   AgentConfigInput,
   BloomErrorCode,
   BloomLink,
-  ConnectionInfo,
-  ProviderInfo,
+  Connection,
+  ConnectionDraft,
+  ConnectionKinds,
+  ProbeResult,
   RunSummary,
   RunTrace,
   UsageReport,
@@ -308,18 +310,49 @@ const api = {
     trace: (agentId: string, runId: string, after?: number): Promise<BloomCall<RunTrace | null>> =>
       ipcRenderer.invoke(IPC.BLOOM_TRACE, agentId, runId, after ?? 0),
 
-    providers: (): Promise<BloomCall<ProviderInfo[]>> => ipcRenderer.invoke(IPC.BLOOM_PROVIDERS),
-    connections: (agentId: string): Promise<BloomCall<ConnectionInfo[]>> =>
-      ipcRenderer.invoke(IPC.BLOOM_CONNECTIONS, agentId),
+    /** What kinds and providers this Bloom offers — a picker built from the wire. */
+    connectionKinds: (): Promise<BloomCall<ConnectionKinds>> =>
+      ipcRenderer.invoke(IPC.BLOOM_CONNECTION_KINDS),
+    /** The global library. Deliberately not scoped to an agent. */
+    connections: (filters?: {
+      kind?: string
+      provider?: string
+      status?: string
+    }): Promise<BloomCall<Connection[]>> => ipcRenderer.invoke(IPC.BLOOM_CONNECTIONS, filters ?? {}),
+    createConnection: (draft: ConnectionDraft): Promise<BloomCall<Connection | null>> =>
+      ipcRenderer.invoke(IPC.BLOOM_CONNECTION_CREATE, draft),
+    updateConnection: (
+      id: string,
+      patch: Record<string, unknown>,
+    ): Promise<BloomCall<Connection | null>> =>
+      ipcRenderer.invoke(IPC.BLOOM_CONNECTION_UPDATE, id, patch),
+    /** 409s when agents still use it, naming them, unless `force`. */
+    deleteConnection: (id: string, force?: boolean): Promise<BloomCall<void>> =>
+      ipcRenderer.invoke(IPC.BLOOM_CONNECTION_DELETE, id, force === true),
+    /** Paste or rotate a secret. Never a patch — a secret must not ride an edit. */
+    setConnectionSecret: (
+      id: string,
+      body: { secret?: string; client_secret?: string },
+    ): Promise<BloomCall<Connection | null>> =>
+      ipcRenderer.invoke(IPC.BLOOM_CONNECTION_SECRET, id, body),
+    revokeConnection: (id: string): Promise<BloomCall<Connection | null>> =>
+      ipcRenderer.invoke(IPC.BLOOM_CONNECTION_REVOKE, id),
+    /** Actually contacts the far end, rather than checking that a secret decrypts. */
+    testConnection: (id: string): Promise<BloomCall<ProbeResult>> =>
+      ipcRenderer.invoke(IPC.BLOOM_CONNECTION_TEST, id),
+
+    agentConnections: (agentId: string): Promise<BloomCall<Connection[]>> =>
+      ipcRenderer.invoke(IPC.BLOOM_AGENT_CONNECTIONS, agentId),
+    attachConnection: (agentId: string, connectionId: string): Promise<BloomCall<Connection[]>> =>
+      ipcRenderer.invoke(IPC.BLOOM_CONNECTION_ATTACH, agentId, connectionId),
+    detachConnection: (agentId: string, connectionId: string): Promise<BloomCall<void>> =>
+      ipcRenderer.invoke(IPC.BLOOM_CONNECTION_DETACH, agentId, connectionId),
     /** Opens the provider's page in the system browser and returns immediately. */
     startOAuth: (
-      agentId: string,
-      provider: string,
+      connectionId: string,
       scopes?: string[],
     ): Promise<BloomCall<{ opened: boolean }>> =>
-      ipcRenderer.invoke(IPC.BLOOM_OAUTH_START, agentId, provider, scopes),
-    disconnect: (agentId: string, provider: string): Promise<BloomCall<void>> =>
-      ipcRenderer.invoke(IPC.BLOOM_OAUTH_DISCONNECT, agentId, provider),
+      ipcRenderer.invoke(IPC.BLOOM_OAUTH_START, connectionId, scopes),
 
     usage: (since?: string): Promise<BloomCall<UsageReport | null>> =>
       ipcRenderer.invoke(IPC.BLOOM_USAGE, since),

@@ -1,0 +1,198 @@
+import { useCallback, useEffect, useState } from 'react'
+
+import type { Connection } from '../../shared/bloom'
+import { Chip, Field, SmallButton } from '../infra/parts'
+
+/**
+ * Every connection this Bloom holds, across all agents.
+ *
+ * The agent-level panel answers "what can this agent reach". This one answers the
+ * questions that are about the credential itself: who uses it, does it still work,
+ * and what happens if it goes away. Those are only answerable *because* connections
+ * stopped being owned by an agent — previously each one belonged to exactly one
+ * config and vanished with it, so there was nothing to list.
+ *
+ * Deleting is the one place this view has to be careful. A shared connection
+ * removed without warning silently strips capability from agents nobody was looking
+ * at, so Bloom refuses with a 409 naming them and that refusal is rendered as a
+ * confirmation rather than an error.
+ */
+export function ConnectionLibrary(): React.JSX.Element {
+  const [connections, setConnections] = useState<Connection[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [probe, setProbe] = useState<Record<string, string>>({})
+  const [rotating, setRotating] = useState<string | null>(null)
+  const [newSecret, setNewSecret] = useState('')
+
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    const result = await window.aperture.bloom.connections()
+    if (result.ok) {
+      setConnections(result.value)
+      setError(null)
+    } else {
+      setError(result.error)
+    }
+    setLoading(false)
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const test = async (connection: Connection): Promise<void> => {
+    setBusy(connection.id)
+    const result = await window.aperture.bloom.testConnection(connection.id)
+    setBusy(null)
+    if (!result.ok) setError(result.error)
+    else setProbe((p) => ({ ...p, [connection.id]: result.value.detail }))
+  }
+
+  /**
+   * Delete, asking first when it is still in use.
+   *
+   * The unforced call is what produces the list of agents, so the confirmation can
+   * name them. Guessing locally from `agentIds` would work today and drift the
+   * moment two windows are open.
+   */
+  const remove = async (connection: Connection): Promise<void> => {
+    setBusy(connection.id)
+    const first = await window.aperture.bloom.deleteConnection(connection.id)
+    setBusy(null)
+    if (first.ok) {
+      await refresh()
+      return
+    }
+    if (first.code !== 'conflict') {
+      setError(first.error)
+      return
+    }
+    if (!window.confirm(`${first.error}\n\nDelete it anyway?`)) return
+    setBusy(connection.id)
+    const forced = await window.aperture.bloom.deleteConnection(connection.id, true)
+    setBusy(null)
+    if (!forced.ok) setError(forced.error)
+    else await refresh()
+  }
+
+  const rotate = async (connection: Connection): Promise<void> => {
+    setBusy(connection.id)
+    const body =
+      connection.kind === 'api_key' ? { secret: newSecret } : { client_secret: newSecret }
+    const result = await window.aperture.bloom.setConnectionSecret(connection.id, body)
+    setBusy(null)
+    setNewSecret('')
+    setRotating(null)
+    if (!result.ok) setError(result.error)
+    else await refresh()
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center gap-2">
+        <p className="min-w-0 flex-1 text-xs text-muted">
+          Every account, key and server Bloom holds. One connection can serve any
+          number of agents — approving it once is enough.
+        </p>
+        <SmallButton onClick={() => void refresh()}>{loading ? 'Reading…' : 'Refresh'}</SmallButton>
+      </div>
+
+      {error && (
+        <p className="rounded-field border border-danger/40 px-3 py-2 text-meta text-danger">
+          {error}
+        </p>
+      )}
+
+      {!loading && connections.length === 0 && (
+        <p className="rounded-field border border-line bg-ground p-3 text-xs text-muted">
+          No connections yet. Add one from any agent&rsquo;s Connections tab — it will
+          appear here, ready for the others.
+        </p>
+      )}
+
+      <ul className="flex flex-col gap-2">
+        {connections.map((connection) => (
+          <li
+            key={connection.id}
+            className="flex flex-col gap-2 rounded-field border border-line bg-ground p-2.5"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-body text-ink">{connection.label || connection.name}</span>
+                  <Chip
+                    tone={
+                      connection.status === 'active'
+                        ? 'ok'
+                        : connection.status === 'revoked'
+                          ? 'muted'
+                          : 'warn'
+                    }
+                  >
+                    {connection.status}
+                  </Chip>
+                  <Chip tone="muted">{connection.kind}</Chip>
+                  <Chip tone={connection.agentIds.length ? 'ok' : 'muted'}>
+                    {connection.agentIds.length === 0
+                      ? 'unused'
+                      : `${connection.agentIds.length} agent${
+                          connection.agentIds.length === 1 ? '' : 's'
+                        }`}
+                  </Chip>
+                </div>
+                <p className="mt-1 truncate font-mono text-micro text-muted">
+                  {probe[connection.id] ?? connection.tools.slice(0, 6).join(' ')}
+                </p>
+              </div>
+
+              <div className="flex shrink-0 gap-1.5">
+                <SmallButton disabled={busy === connection.id} onClick={() => void test(connection)}>
+                  {busy === connection.id ? '…' : 'Test'}
+                </SmallButton>
+                {connection.kind !== 'oauth' && (
+                  <SmallButton
+                    onClick={() => setRotating((r) => (r === connection.id ? null : connection.id))}
+                  >
+                    {connection.hasSecret ? 'Rotate' : 'Set key'}
+                  </SmallButton>
+                )}
+                {connection.kind === 'oauth' && connection.hasClientSecret && (
+                  <SmallButton
+                    onClick={() => setRotating((r) => (r === connection.id ? null : connection.id))}
+                  >
+                    Rotate app secret
+                  </SmallButton>
+                )}
+                <SmallButton danger onClick={() => void remove(connection)}>
+                  Delete
+                </SmallButton>
+              </div>
+            </div>
+
+            {rotating === connection.id && (
+              <div className="flex flex-wrap items-center gap-2 pl-1">
+                <Field
+                  value={newSecret}
+                  onChange={setNewSecret}
+                  type="password"
+                  placeholder={connection.kind === 'api_key' ? 'new key' : 'new client secret'}
+                  onEnter={() => void rotate(connection)}
+                />
+                <SmallButton primary disabled={!newSecret} onClick={() => void rotate(connection)}>
+                  Save
+                </SmallButton>
+                <span className="text-micro text-muted">
+                  {connection.kind === 'oauth'
+                    ? 'Rotating the app secret leaves the approved account alone.'
+                    : 'Replaces the stored key. Nothing is ever shown back.'}
+                </span>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}

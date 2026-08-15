@@ -601,39 +601,6 @@ export const ACTIONS: Record<string, ActionDef> = {
     build: (p) => `bash ${script('install/declare.sh')} --app ${q(p.app)} --reconcile --adopt`,
   },
 
-  /**
-   * Write saved credentials into an app's stanza, without installing anything.
-   *
-   * The path for a key whose *existence* was not known when the app was declared — a
-   * provider added to Bloom after the fact. `installApp` fills the manifest's named
-   * keys; this fills whichever ones the caller resolved from a live discovery, and is
-   * otherwise the same mechanism: uids in, heredocs out, no value in `argv`.
-   */
-  fillCredentials: {
-    label: 'Set credentials',
-    needsSudo: true,
-    resolvesCredentials: true,
-    rehearse: (p, secrets) =>
-      [
-        `echo "==> would set ${(secrets ?? []).map((s) => s.key).join(', ')} for ${p.app}"`,
-        // Shape, never content — the same rule setVar's rehearsal follows.
-        ...(secrets ?? []).map(
-          (s) => `echo " !  ${s.key}: ${s.value.length} characters"`,
-        ),
-      ].join('\n'),
-    build: (p, secrets) =>
-      [
-        'set -e',
-        ...(secrets ?? []).flatMap((s) => [
-          heredoc('APERTURE_VALUE', s.value),
-          `V="$APERTURE_VALUE" yq -i ${q(`.apps."${p.app}".env."${s.key}" = strenv(V)`)} ${q(SECRETS)}`,
-          `echo " ok  ${s.key} set"`,
-        ]),
-        `chmod 600 ${q(SECRETS)}`,
-        `echo " !  reconcile or restart ${p.app} to hand these to the running container"`,
-      ].join('\n'),
-  },
-
   fillSecrets: {
     label: 'Generate what the box can',
     needsSudo: true,

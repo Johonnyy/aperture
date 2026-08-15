@@ -16,7 +16,11 @@
  */
 import {
   createSseParser,
+  fromConnectionDraft,
   toAgentConfig,
+  toConnection,
+  toConnectionKinds,
+  toProbeResult,
   toRunEvent,
   toRunSummary,
   toUsage,
@@ -192,12 +196,104 @@ check(
 check('a null slug survives as null', toRunSummary({ id: 'r1', agent_slug: null }).agentSlug, null)
 
 check(
-  'an agent config maps its arrays and nullable ceilings',
+  'an agent config maps its connection ids and nullable ceilings',
   (() => {
-    const a = toAgentConfig({ id: 'a1', slug: 'dj', system_prompt: 'p', mcp_servers: ['amber'], max_steps: null })
-    return [a.slug, a.systemPrompt, a.mcpServers, a.maxSteps]
+    const a = toAgentConfig({
+      id: 'a1',
+      slug: 'dj',
+      system_prompt: 'p',
+      connections: ['c1', 'c2'],
+      max_steps: null,
+    })
+    return [a.slug, a.systemPrompt, a.connections, a.maxSteps]
   })(),
-  ['dj', 'p', ['amber'], null],
+  ['dj', 'p', ['c1', 'c2'], null],
+)
+
+// --- connections ------------------------------------------------------------
+
+// The property the whole rework turns on: no route returns a secret, so the wire
+// carries booleans and the mapper must not invent anything richer.
+check(
+  'a connection maps without ever carrying a secret',
+  (() => {
+    const c = toConnection({
+      id: 'c1',
+      kind: 'api_key',
+      provider: 'github',
+      name: 'github',
+      label: 'GitHub',
+      status: 'active',
+      config: { client_id: 'app-id' },
+      has_secret: true,
+      has_client_secret: false,
+      scopes: ['repo'],
+      agent_ids: ['a1'],
+      tools: ['github_whoami'],
+    })
+    return [c.kind, c.hasSecret, c.hasClientSecret, c.config.client_id, c.agentIds, c.tools]
+  })(),
+  ['api_key', true, false, 'app-id', ['a1'], ['github_whoami']],
+)
+
+check(
+  'a peer connection keeps a null provider rather than an empty string',
+  toConnection({ id: 'c1', kind: 'mcp', provider: null, name: 'amber' }).provider,
+  null,
+)
+
+check('a connection row with no id is dropped', toConnection({ kind: 'mcp' }), null)
+
+// `checked` says which claim the tick is making — "it decrypts" and "the provider
+// accepted it" are very different, and reporting the weaker as the stronger is how
+// a green tick comes to mean nothing.
+check(
+  'a probe keeps which check it actually ran',
+  (() => {
+    const p = toProbeResult({ ok: true, checked: 'request', status: 200, detail: 'fine' })
+    return [p.ok, p.checked, p.status]
+  })(),
+  [true, 'request', 200],
+)
+
+check(
+  'an unknown probe check falls back to the weakest claim',
+  toProbeResult({ ok: true, checked: 'invented' }).checked,
+  'token',
+)
+
+check(
+  'connection kinds drop anything this build does not know',
+  (() => {
+    const k = toConnectionKinds({
+      kinds: [
+        { kind: 'oauth', available: true, reason: '' },
+        { kind: 'telepathy', available: true, reason: '' },
+      ],
+      providers: [{ name: 'github', auth: ['oauth', 'api_key', 'nonsense'] }],
+      discovered_peers: [{ name: 'amber', base_url: 'https://amber.example' }],
+    })
+    return [k.kinds.map((x) => x.kind), k.providers[0].auth, k.discoveredPeers[0].name]
+  })(),
+  [['oauth'], ['oauth', 'api_key'], 'amber'],
+)
+
+// An empty string would be stored as a real (empty) client secret, and Bloom
+// refuses an unknown field outright, so both are dropped rather than sent.
+check(
+  'a draft drops undefined and empty fields rather than sending them',
+  (() => {
+    const out = fromConnectionDraft({
+      kind: 'mcp',
+      name: 'amber',
+      config: { url: 'https://amber.example' },
+      secret: '',
+      clientId: undefined,
+      attachTo: ['a1'],
+    })
+    return Object.keys(out).sort()
+  })(),
+  ['attach_to', 'config', 'kind', 'name'],
 )
 
 // Bloom distinguishes "nothing has called me" from "nobody could". Flattening the

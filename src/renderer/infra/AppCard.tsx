@@ -4,7 +4,6 @@ import { containerExists } from '../../shared/bloom'
 import type { CredentialSummary, InfraApp } from '../../shared/types'
 import { EnvEditor } from './EnvEditor'
 import { Chip, Field, SmallButton } from './parts'
-import { Connections } from './Connections'
 import { fillsFor, readinessFor, ReadinessList, ReadinessSummary } from './Readiness'
 import { compareVersions, tagOf, type ReleaseInfo } from '../../shared/version'
 import type { Params } from './useRunner'
@@ -297,19 +296,6 @@ export function AppCard({
             onConfig={(key, value) => setConfigs((c) => ({ ...c, [key]: value }))}
           />
         </div>
-      )}
-
-      {/* Connected services, for an app whose credentials are discovered rather than
-          listed. Outside Manage and outside Advanced: adding a connection is an
-          ordinary thing to want, not machinery. */}
-      {!notDeployed && (
-        <Connections
-          app={app}
-          run={run}
-          credentials={credentials}
-          onCredentialSaved={onCredentialSaved}
-          disabled={false}
-        />
       )}
 
       {open && (

@@ -557,23 +557,6 @@ export interface ManifestKey {
   secret: boolean
 }
 
-/**
- * Keys an app accepts whose *set* it cannot know in advance.
- *
- * Bloom's per-provider OAuth client credentials are the case: one pair per connected
- * service, and the services are a directory of manifests inside the image. Listing
- * them by name would mean an amber-infra release for every connection ever added, so
- * the manifest declares the prefix and where the live list comes from instead.
- */
-export interface DynamicKeyGroup {
-  /** e.g. `BLOOM_OAUTH_`. Keys under it are legitimate, not orphans. */
-  prefix: string
-  label: string
-  /** Which discovery to run. `bloom-oauth-providers` is the only one so far. */
-  discover: string | null
-  why: string | null
-}
-
 /** An app's own account of what it needs. Null when its checkout has no manifest. */
 export interface ManifestDoc {
   version: number
@@ -582,8 +565,6 @@ export interface ManifestDoc {
   role: string | null
   release: { repo: string | null; package: string | null } | null
   keys: ManifestKey[]
-  /** Present from schema 9. Empty for an app that names everything it needs. */
-  dynamicKeys?: DynamicKeyGroup[]
 }
 
 export interface CatalogueEntry {

@@ -433,18 +433,41 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
     bloomApi.runTrace(emit, agentId, runId, after ?? 0),
   )
 
-  ipcMain.handle(IPC.BLOOM_PROVIDERS, () => bloomApi.listProviders(emit))
-  ipcMain.handle(IPC.BLOOM_CONNECTIONS, (_e, agentId: string) =>
-    bloomApi.listConnections(emit, agentId),
+  ipcMain.handle(IPC.BLOOM_CONNECTION_KINDS, () => bloomApi.connectionKinds(emit))
+  ipcMain.handle(IPC.BLOOM_CONNECTIONS, (_e, filters?: Record<string, string>) =>
+    bloomApi.listConnections(emit, filters ?? {}),
+  )
+  ipcMain.handle(IPC.BLOOM_CONNECTION_CREATE, (_e, draft: Record<string, unknown>) =>
+    bloomApi.createConnection(emit, draft),
+  )
+  ipcMain.handle(IPC.BLOOM_CONNECTION_UPDATE, (_e, id: string, patch: Record<string, unknown>) =>
+    bloomApi.updateConnection(emit, id, patch),
+  )
+  ipcMain.handle(IPC.BLOOM_CONNECTION_DELETE, (_e, id: string, force?: boolean) =>
+    bloomApi.deleteConnection(emit, id, force === true),
+  )
+  ipcMain.handle(
+    IPC.BLOOM_CONNECTION_SECRET,
+    (_e, id: string, body: { secret?: string; client_secret?: string }) =>
+      bloomApi.setConnectionSecret(emit, id, body),
+  )
+  ipcMain.handle(IPC.BLOOM_CONNECTION_REVOKE, (_e, id: string) =>
+    bloomApi.revokeConnection(emit, id),
+  )
+  ipcMain.handle(IPC.BLOOM_CONNECTION_TEST, (_e, id: string) => bloomApi.testConnection(emit, id))
+
+  ipcMain.handle(IPC.BLOOM_AGENT_CONNECTIONS, (_e, agentId: string) =>
+    bloomApi.agentConnections(emit, agentId),
+  )
+  ipcMain.handle(IPC.BLOOM_CONNECTION_ATTACH, (_e, agentId: string, connectionId: string) =>
+    bloomApi.attachConnection(emit, agentId, connectionId),
+  )
+  ipcMain.handle(IPC.BLOOM_CONNECTION_DETACH, (_e, agentId: string, connectionId: string) =>
+    bloomApi.detachConnection(emit, agentId, connectionId),
   )
   /** Opens the authorize URL in the *system* browser — never an embedded window. */
-  ipcMain.handle(
-    IPC.BLOOM_OAUTH_START,
-    (_e, agentId: string, provider: string, scopes?: string[]) =>
-      bloomApi.startOAuth(emit, agentId, provider, scopes),
-  )
-  ipcMain.handle(IPC.BLOOM_OAUTH_DISCONNECT, (_e, agentId: string, provider: string) =>
-    bloomApi.disconnectProvider(emit, agentId, provider),
+  ipcMain.handle(IPC.BLOOM_OAUTH_START, (_e, connectionId: string, scopes?: string[]) =>
+    bloomApi.startOAuth(emit, connectionId, scopes),
   )
 
   ipcMain.handle(IPC.BLOOM_USAGE, (_e, since?: string) => bloomApi.usage(emit, since))

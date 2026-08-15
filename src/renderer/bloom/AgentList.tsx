@@ -55,13 +55,13 @@ export function AgentList({
                   <span className="text-xs text-muted">{agent.name}</span>
                 )}
                 <Chip>{agent.modelTier}</Chip>
-                {agent.mcpServers.map((server) => (
-                  <Chip key={server}>{server}</Chip>
-                ))}
-                {agent.oauthConnections.length > 0 && (
+                {/* A count, not a list of names: what an agent can reach is one
+                    vocabulary now, and the names live on its Connections tab where
+                    each one says what it actually gives you. */}
+                {agent.connections.length > 0 && (
                   <Chip tone="ok">
-                    {agent.oauthConnections.length} account
-                    {agent.oauthConnections.length === 1 ? '' : 's'}
+                    {agent.connections.length} connection
+                    {agent.connections.length === 1 ? '' : 's'}
                   </Chip>
                 )}
               </div>

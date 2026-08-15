@@ -98,10 +98,21 @@ export const IPC = {
   BLOOM_AGENT_RUNS: 'bloom:agent-runs',
   BLOOM_TRACE: 'bloom:trace',
 
-  BLOOM_PROVIDERS: 'bloom:providers',
+  /** What kinds and providers this Bloom offers, so a picker is built from the wire. */
+  BLOOM_CONNECTION_KINDS: 'bloom:connection-kinds',
+  /** The global library. Not scoped to an agent — that is the point of it. */
   BLOOM_CONNECTIONS: 'bloom:connections',
+  BLOOM_CONNECTION_CREATE: 'bloom:connection-create',
+  BLOOM_CONNECTION_UPDATE: 'bloom:connection-update',
+  BLOOM_CONNECTION_DELETE: 'bloom:connection-delete',
+  BLOOM_CONNECTION_SECRET: 'bloom:connection-secret',
+  BLOOM_CONNECTION_REVOKE: 'bloom:connection-revoke',
+  BLOOM_CONNECTION_TEST: 'bloom:connection-test',
+  /** What one agent has attached, and attaching or detaching it. */
+  BLOOM_AGENT_CONNECTIONS: 'bloom:agent-connections',
+  BLOOM_CONNECTION_ATTACH: 'bloom:connection-attach',
+  BLOOM_CONNECTION_DETACH: 'bloom:connection-detach',
   BLOOM_OAUTH_START: 'bloom:oauth-start',
-  BLOOM_OAUTH_DISCONNECT: 'bloom:oauth-disconnect',
 
   BLOOM_USAGE: 'bloom:usage',
   /** Pull a deep link that landed before the renderer was listening. */

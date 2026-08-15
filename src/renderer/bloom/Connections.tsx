@@ -1,42 +1,59 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import type { AgentConfig, ConnectionInfo, ProviderInfo } from '../../shared/bloom'
-import { Chip, SmallButton } from '../infra/parts'
+import {
+  CONNECTION_NAME_PATTERN,
+  KIND_LABELS,
+  type AgentConfig,
+  type Connection,
+  type ConnectionDraft,
+  type ConnectionKind,
+  type ConnectionKinds,
+} from '../../shared/bloom'
+import { Chip, Field, SmallButton } from '../infra/parts'
 
 /**
- * The accounts an agent may act through.
+ * What an agent can act through.
  *
- * The flow leaves this app on purpose: Bloom hosts the callback because it has a
- * public address and a desktop app does not, so Aperture only starts the flow and
- * observes the result. The authorize URL opens in the *system* browser — providers
- * increasingly refuse embedded webviews outright, and the system browser already has
- * the user's session.
+ * **Connection-first, not provider-first.** This panel used to list every provider
+ * Bloom shipped a manifest for and put a Connect button beside each — which meant
+ * the only thing you could add was an OAuth account for a provider someone had
+ * already written a manifest for, and adding one greyed itself out unless the
+ * *server* had client credentials in `secrets.yaml`. Now the list is what this
+ * agent actually has, and "Add connection" opens a picker built from the wire.
  *
- * **`configured` is the field that earns its place.** It distinguishes "Bloom ships a
- * manifest for this provider" from "this deployment has client credentials", and
- * those fail in completely different places: without credentials the Connect button
- * would die at the redirect with a provider-side error. Saying so here, and naming
- * where the fix lives, is the difference between a dead button and a route out.
+ * **Everything here is a library entry.** Creating one from this page attaches it;
+ * the connection itself belongs to no agent, any other agent can attach the same
+ * one, and deleting this agent deletes none of them. "Attach existing" is the other
+ * half of that, and the reason approving Spotify once is enough.
  *
- * No token value is ever returned by Bloom, and none is ever displayed.
+ * The OAuth flow still leaves the app: Bloom hosts the callback because it has a
+ * public address and a desktop app does not, and the authorize URL opens in the
+ * *system* browser because providers increasingly refuse embedded webviews.
+ *
+ * No secret value is ever returned by Bloom, and none is ever displayed.
  */
 export function Connections({ agent }: { agent: AgentConfig }): React.JSX.Element {
-  const [providers, setProviders] = useState<ProviderInfo[]>([])
-  const [connections, setConnections] = useState<ConnectionInfo[]>([])
+  const [attached, setAttached] = useState<Connection[]>([])
+  const [library, setLibrary] = useState<Connection[]>([])
+  const [kinds, setKinds] = useState<ConnectionKinds | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [pending, setPending] = useState<string | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [picking, setPicking] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [probe, setProbe] = useState<Record<string, string>>({})
 
   const refresh = useCallback(async () => {
     setLoading(true)
-    const [p, c] = await Promise.all([
-      window.aperture.bloom.providers(),
-      window.aperture.bloom.connections(agent.id),
+    const [mine, all, k] = await Promise.all([
+      window.aperture.bloom.agentConnections(agent.id),
+      window.aperture.bloom.connections(),
+      window.aperture.bloom.connectionKinds(),
     ])
-    if (p.ok) setProviders(p.value)
-    if (c.ok) setConnections(c.value)
-    const failure = !p.ok ? p.error : !c.ok ? c.error : null
-    setError(failure)
+    if (mine.ok) setAttached(mine.value)
+    if (all.ok) setLibrary(all.value)
+    if (k.ok) setKinds(k.value)
+    setError(!mine.ok ? mine.error : !all.ok ? all.error : !k.ok ? k.error : null)
     setLoading(false)
   }, [agent.id])
 
@@ -50,9 +67,6 @@ export function Connections({ agent }: { agent: AgentConfig }): React.JSX.Elemen
    * Note what this does *not* do: trust the URL. It carries a `provider` and a
    * `status`, both attacker-reachable, so the only thing acted on is the fact that
    * *something* completed — the answer comes from Bloom, which recorded it.
-   *
-   * The pull on mount covers a handoff that landed before this panel existed; the
-   * subscription covers one that arrives while it is open.
    */
   useEffect(() => {
     void window.aperture.bloom.pendingOAuth().then((held) => {
@@ -63,118 +77,407 @@ export function Connections({ agent }: { agent: AgentConfig }): React.JSX.Elemen
     })
   }, [refresh])
 
-  /**
-   * The browser comes back to Bloom, not here, so nothing in this app learns the
-   * outcome directly. When the deep link lands, main re-emits and we re-read — and
-   * this button is the manual equivalent, which the flow needs anyway: on macOS the
-   * `aperture://` scheme only really registers from a packaged app, so without it
-   * the whole thing is untestable under `npm run dev` there.
-   */
-  const connect = async (provider: string): Promise<void> => {
-    setPending(provider)
-    const result = await window.aperture.bloom.startOAuth(agent.id, provider)
-    setPending(null)
+  const run = async (id: string, fn: () => Promise<{ ok: boolean; error?: string }>) => {
+    setBusy(id)
+    const result = await fn()
+    setBusy(null)
+    if (!result.ok) setError(result.error ?? 'That did not work.')
+    else await refresh()
+    return result.ok
+  }
+
+  const connect = async (connection: Connection): Promise<void> => {
+    setBusy(connection.id)
+    const result = await window.aperture.bloom.startOAuth(connection.id)
+    setBusy(null)
     if (!result.ok) setError(result.error)
   }
 
-  const disconnect = async (provider: string): Promise<void> => {
-    if (!window.confirm(`Disconnect ${provider}? ${agent.slug} will lose access to it.`)) return
-    const result = await window.aperture.bloom.disconnect(agent.id, provider)
-    if (result.ok) await refresh()
-    else setError(result.error)
+  const test = async (connection: Connection): Promise<void> => {
+    setBusy(connection.id)
+    const result = await window.aperture.bloom.testConnection(connection.id)
+    setBusy(null)
+    if (!result.ok) setError(result.error)
+    else setProbe((p) => ({ ...p, [connection.id]: result.value.detail }))
   }
 
-  const byProvider = new Map(connections.map((c) => [c.provider, c]))
+  const detach = async (connection: Connection): Promise<void> => {
+    const others = connection.agentIds.filter((id) => id !== agent.id).length
+    const note = others
+      ? `${others} other agent${others === 1 ? '' : 's'} keep using it.`
+      : 'It stays in the library, so you can attach it again.'
+    if (!window.confirm(`Remove ${connection.label || connection.name} from ${agent.slug}? ${note}`))
+      return
+    await run(connection.id, () =>
+      window.aperture.bloom.detachConnection(agent.id, connection.id),
+    )
+  }
+
+  const unattached = library.filter((c) => !attached.some((a) => a.id === c.id))
 
   return (
-    <div className="flex flex-col gap-3 rounded-panel border border-line bg-raised/50 p-3">
-      <div className="flex items-center gap-2">
-        <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-medium">Connected accounts</h3>
-          <p className="text-xs text-muted">
-            Bloom holds these credentials. They never reach Amber, this app, or the
-            model — only the tools that call the provider.
-          </p>
-        </div>
-        <SmallButton onClick={() => void refresh()}>
-          {loading ? 'Reading…' : 'Re-check'}
+    <div className="flex flex-col gap-3">
+      {error && (
+        <p className="rounded-field border border-danger/40 px-3 py-2 text-meta text-danger">
+          {error}
+        </p>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="min-w-0 flex-1 text-xs text-muted">
+          Bloom holds these credentials. They never reach Amber, this app, or the
+          model — only the tools that call the service.
+        </p>
+        <SmallButton primary onClick={() => setAdding((a) => !a)}>
+          {adding ? 'Cancel' : 'Add connection'}
+        </SmallButton>
+        <SmallButton
+          disabled={unattached.length === 0}
+          title={
+            unattached.length
+              ? 'Reuse a connection you have already set up'
+              : 'Every connection you have is already attached'
+          }
+          onClick={() => setPicking((p) => !p)}
+        >
+          Attach existing
         </SmallButton>
       </div>
 
-      {error && <p className="text-meta text-danger">{error}</p>}
+      {adding && kinds && (
+        <AddConnection
+          kinds={kinds}
+          agentId={agent.id}
+          onDone={async () => {
+            setAdding(false)
+            await refresh()
+          }}
+          onError={setError}
+        />
+      )}
 
-      {!loading && providers.length === 0 && (
-        <p className="text-xs text-muted">Bloom has no provider manifests installed.</p>
+      {picking && (
+        <div className="flex flex-col gap-2 rounded-field border border-line bg-ground p-2.5">
+          <p className="text-meta text-muted">
+            Already set up. Attaching costs nothing and approves nothing again.
+          </p>
+          {unattached.map((connection) => (
+            <div key={connection.id} className="flex flex-wrap items-center gap-2">
+              <span className="min-w-0 flex-1 truncate text-body">
+                {connection.label || connection.name}
+              </span>
+              <Chip tone="muted">{connection.kind}</Chip>
+              <SmallButton
+                disabled={busy === connection.id}
+                onClick={async () => {
+                  const ok = await run(connection.id, () =>
+                    window.aperture.bloom.attachConnection(agent.id, connection.id),
+                  )
+                  if (ok) setPicking(false)
+                }}
+              >
+                Attach
+              </SmallButton>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!loading && attached.length === 0 && !adding && (
+        <p className="rounded-field border border-line bg-ground p-3 text-xs text-muted">
+          Nothing connected yet. This agent can think and talk, but it cannot reach
+          anything — add a connection to give it tools.
+        </p>
       )}
 
       <ul className="flex flex-col gap-2">
-        {providers.map((provider) => {
-          const connection = byProvider.get(provider.name)
-          const active = connection?.status === 'active'
-          return (
-            <li
-              key={provider.name}
-              className="flex flex-wrap items-center gap-2 rounded-field border border-line bg-ground p-2.5"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-body text-ink">{provider.displayName}</span>
-                  {connection && (
-                    <Chip tone={active ? 'ok' : connection.status === 'revoked' ? 'muted' : 'warn'}>
-                      {connection.status}
-                    </Chip>
-                  )}
-                  {!provider.configured && <Chip tone="warn">not configured</Chip>}
-                </div>
-                {!provider.configured ? (
-                  <p className="mt-1 text-xs text-muted">
-                    Bloom has a manifest for this, but no client credentials on this
-                    deployment. Add them under <code>apps.bloom.env</code> in
-                    secrets.yaml — the Servers tab edits that.
-                  </p>
-                ) : connection && connection.scopes.length > 0 ? (
-                  <p className="mt-1 truncate font-mono text-micro text-muted">
-                    {connection.scopes.join(' ')}
-                  </p>
-                ) : (
-                  <p className="mt-1 text-xs text-muted">
-                    {provider.operations.length} tool
-                    {provider.operations.length === 1 ? '' : 's'} once connected
-                  </p>
+        {attached.map((connection) => (
+          <li
+            key={connection.id}
+            className="flex flex-wrap items-center gap-2 rounded-field border border-line bg-ground p-2.5"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-body text-ink">{connection.label || connection.name}</span>
+                <Chip tone={statusTone(connection)}>{connection.status}</Chip>
+                <Chip tone="muted">{connection.kind}</Chip>
+                {connection.agentIds.length > 1 && (
+                  <Chip tone="muted">
+                    shared with {connection.agentIds.length - 1} other
+                    {connection.agentIds.length === 2 ? '' : 's'}
+                  </Chip>
                 )}
               </div>
+              <p className="mt-1 truncate font-mono text-micro text-muted">
+                {probe[connection.id] ?? summarise(connection)}
+              </p>
+            </div>
 
-              <div className="flex shrink-0 gap-1.5">
-                <SmallButton
-                  disabled={!provider.configured || pending === provider.name}
-                  title={
-                    provider.configured
-                      ? undefined
-                      : 'No client credentials for this provider on this Bloom.'
-                  }
-                  onClick={() => void connect(provider.name)}
-                >
-                  {pending === provider.name
-                    ? 'Opening…'
-                    : active
-                      ? 'Reconnect'
-                      : 'Connect'}
+            <div className="flex shrink-0 gap-1.5">
+              <SmallButton disabled={busy === connection.id} onClick={() => void test(connection)}>
+                {busy === connection.id ? '…' : 'Test'}
+              </SmallButton>
+              {connection.kind === 'oauth' && (
+                <SmallButton disabled={busy === connection.id} onClick={() => void connect(connection)}>
+                  {connection.status === 'active' ? 'Reconnect' : 'Connect'}
                 </SmallButton>
-                {connection && connection.status !== 'revoked' && (
-                  <SmallButton danger onClick={() => void disconnect(provider.name)}>
-                    Disconnect
-                  </SmallButton>
-                )}
-              </div>
-            </li>
-          )
-        })}
+              )}
+              <SmallButton danger onClick={() => void detach(connection)}>
+                Remove
+              </SmallButton>
+            </div>
+          </li>
+        ))}
       </ul>
 
       <p className="text-micro text-muted">
         Approving in the browser returns you here automatically. If it does not, press
-        Re-check — the server already recorded the outcome either way.
+        Test — the server already recorded the outcome either way.
       </p>
+    </div>
+  )
+}
+
+function statusTone(connection: Connection): 'ok' | 'warn' | 'muted' {
+  if (connection.status === 'active') return 'ok'
+  if (connection.status === 'revoked') return 'muted'
+  return 'warn'
+}
+
+/** One line saying what this gives the agent, without ever showing a secret. */
+function summarise(connection: Connection): string {
+  if (connection.status === 'pending') {
+    return connection.kind === 'oauth'
+      ? 'Not approved yet — press Connect.'
+      : 'No key stored yet.'
+  }
+  const url = typeof connection.config.url === 'string' ? connection.config.url : ''
+  if (connection.kind === 'mcp') return url
+  return connection.tools.slice(0, 6).join(' ') || 'No tools available.'
+}
+
+/**
+ * Pick a kind, then say what it needs. Inline, not a modal.
+ *
+ * The house style: there is exactly one modal in this app, and every "add X" flow
+ * expands in place. The kind list comes from Bloom rather than being hardcoded, so
+ * a build that cannot store secrets says why here instead of failing later.
+ */
+function AddConnection({
+  kinds,
+  agentId,
+  onDone,
+  onError,
+}: {
+  kinds: ConnectionKinds
+  agentId: string
+  onDone: () => void | Promise<void>
+  onError: (message: string) => void
+}): React.JSX.Element {
+  const [kind, setKind] = useState<ConnectionKind | null>(null)
+  const [provider, setProvider] = useState('')
+  const [name, setName] = useState('')
+  const [url, setUrl] = useState('')
+  const [secret, setSecret] = useState('')
+  const [clientId, setClientId] = useState('')
+  const [clientSecret, setClientSecret] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const chosen = kinds.providers.find((p) => p.name === provider)
+  const usable = kinds.providers.filter((p) => kind && p.auth.includes(kind))
+
+  const create = async (): Promise<void> => {
+    if (!kind) return
+    const draft: ConnectionDraft = { kind, attachTo: [agentId] }
+    if (kind === 'mcp') {
+      draft.name = name.trim()
+      draft.config = { url: url.trim() }
+      if (secret.trim()) draft.secret = secret.trim()
+    } else {
+      draft.provider = provider
+      if (name.trim()) draft.name = name.trim()
+      if (kind === 'api_key' && secret.trim()) draft.secret = secret.trim()
+      if (clientId.trim()) draft.clientId = clientId.trim()
+      if (clientSecret.trim()) draft.clientSecret = clientSecret.trim()
+    }
+
+    setBusy(true)
+    const created = await window.aperture.bloom.createConnection(draft)
+    setBusy(false)
+    if (!created.ok) {
+      onError(created.error)
+      return
+    }
+    // An OAuth connection is not usable until the browser comes back, so go
+    // straight there rather than leaving a `pending` row and no explanation.
+    if (kind === 'oauth' && created.value) {
+      const started = await window.aperture.bloom.startOAuth(created.value.id)
+      if (!started.ok) onError(started.error)
+    }
+    await onDone()
+  }
+
+  const nameOk = kind !== 'mcp' || CONNECTION_NAME_PATTERN.test(name.trim())
+  const ready =
+    kind === 'mcp' ? nameOk && url.trim() !== '' : provider !== '' && (kind !== 'api_key' || true)
+
+  return (
+    <div className="flex flex-col gap-2.5 rounded-field border border-accent-deep/40 bg-ground p-3">
+      <div className="flex flex-wrap gap-1.5">
+        {kinds.kinds.map((k) => (
+          <button
+            key={k.kind}
+            type="button"
+            disabled={!k.available}
+            title={k.available ? undefined : k.reason}
+            onClick={() => {
+              setKind(k.kind)
+              setProvider('')
+            }}
+            className={[
+              'rounded-control border px-2.5 py-1.5 text-left text-meta transition-colors',
+              !k.available
+                ? 'cursor-not-allowed border-line text-muted opacity-50'
+                : kind === k.kind
+                  ? 'border-accent-deep bg-accent/15 text-accent-hi'
+                  : 'border-line text-muted hover:text-ink',
+            ].join(' ')}
+          >
+            <span className="block">{KIND_LABELS[k.kind].title}</span>
+            <span className="block text-micro text-muted">{KIND_LABELS[k.kind].blurb}</span>
+          </button>
+        ))}
+      </div>
+
+      {kind === 'mcp' && (
+        <>
+          <Row label="Name" hint="Also the tool prefix: name__tool. Lowercase, no spaces.">
+            <Field value={name} onChange={setName} placeholder="finance" />
+          </Row>
+          {name !== '' && !nameOk && (
+            <p className="text-meta text-danger">
+              Lowercase letters, digits, hyphen and underscore, starting with a letter.
+              No double underscore.
+            </p>
+          )}
+          <Row label="URL" hint="The server's base URL. Bloom appends /mcp itself.">
+            <Field value={url} onChange={setUrl} placeholder="https://finance.johnny.dev" />
+          </Row>
+          <Row label="Token" hint="Optional. Leave blank for a server that needs none.">
+            <Field value={secret} onChange={setSecret} type="password" placeholder="bearer token" />
+          </Row>
+          {kinds.discoveredPeers.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-micro text-muted">Known:</span>
+              {kinds.discoveredPeers.map((peer) => (
+                <SmallButton
+                  key={peer.name}
+                  onClick={() => {
+                    setName(peer.name)
+                    setUrl(peer.baseUrl)
+                  }}
+                >
+                  {peer.name}
+                </SmallButton>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {kind && kind !== 'mcp' && (
+        <>
+          <Row label="Service" hint="What Bloom ships a manifest for.">
+            <select
+              value={provider}
+              onChange={(e) => setProvider(e.target.value)}
+              className="rounded-control border border-line bg-raised px-2.5 py-1 text-meta text-ink outline-none focus:border-accent-deep"
+            >
+              <option value="">choose…</option>
+              {usable.map((p) => (
+                <option key={p.name} value={p.name}>
+                  {p.displayName}
+                </option>
+              ))}
+            </select>
+            {chosen?.docsUrl && (
+              <a
+                href={chosen.docsUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="text-micro text-muted underline hover:text-accent-hi"
+              >
+                docs
+              </a>
+            )}
+          </Row>
+
+          {kind === 'api_key' && chosen && (
+            <Row label={chosen.apiKey?.label ?? 'Key'} hint={chosen.apiKey?.help}>
+              <Field value={secret} onChange={setSecret} type="password" placeholder="paste it" />
+            </Row>
+          )}
+
+          {kind === 'oauth' && chosen && (
+            <>
+              <p className="text-micro text-muted">
+                {chosen.hasDeploymentDefault
+                  ? 'This Bloom already has an app registered for ' +
+                    chosen.displayName +
+                    '. Leave these blank to use it.'
+                  : 'Register an app with ' +
+                    chosen.displayName +
+                    ' and paste its credentials. They are stored encrypted, on the connection.'}
+              </p>
+              <Row label="Client ID" hint="From the app you registered with the provider.">
+                <Field value={clientId} onChange={setClientId} placeholder="client id" />
+              </Row>
+              <Row label="Secret" hint="Encrypted at rest. Never returned by any API.">
+                <Field
+                  value={clientSecret}
+                  onChange={setClientSecret}
+                  type="password"
+                  placeholder="client secret"
+                />
+              </Row>
+            </>
+          )}
+
+          <Row label="Label" hint="Optional. Defaults to the service name.">
+            <Field value={name} onChange={setName} placeholder="spotify" />
+          </Row>
+        </>
+      )}
+
+      {kind && (
+        <div className="flex items-center gap-2">
+          <SmallButton primary disabled={busy || !ready} onClick={() => void create()}>
+            {busy ? 'Adding…' : kind === 'oauth' ? 'Add and approve' : 'Add'}
+          </SmallButton>
+          {kind === 'oauth' && (
+            <span className="text-micro text-muted">Opens your browser to approve.</span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Row({
+  label,
+  hint,
+  children,
+}: {
+  label: string
+  hint?: string
+  children: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="w-20 shrink-0 text-meta text-muted" title={hint}>
+        {label}
+      </span>
+      {children}
     </div>
   )
 }

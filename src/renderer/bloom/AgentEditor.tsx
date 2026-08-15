@@ -11,6 +11,12 @@ import { Field, SmallButton } from '../infra/parts'
 /**
  * Creating and editing an agent.
  *
+ * **It asks what the agent *is*, and nothing about what it can reach.** There used
+ * to be a "Servers" box here — a comma-separated list of peer MCP names, typed from
+ * memory, never validated, at the one moment you are least likely to know the
+ * answer: before the agent exists. Capability is attached afterwards, under
+ * Connections, where you can see what each one gives you.
+ *
  * Local draft, dirty check, explicit Save — the same idiom as `SettingRow` and
  * `SettingsView`, because a field that saves as you type is a field you cannot
  * abandon halfway.
@@ -41,7 +47,6 @@ export function AgentEditor({
   const [name, setName] = useState(agent?.name ?? '')
   const [prompt, setPrompt] = useState(agent?.systemPrompt ?? '')
   const [tier, setTier] = useState(agent?.modelTier ?? 'balanced')
-  const [servers, setServers] = useState((agent?.mcpServers ?? []).join(', '))
   const [maxSteps, setMaxSteps] = useState(agent?.maxSteps?.toString() ?? '')
   const [maxCost, setMaxCost] = useState(agent?.maxCostUsd?.toString() ?? '')
   const [busy, setBusy] = useState(false)
@@ -53,7 +58,6 @@ export function AgentEditor({
     name !== (agent?.name ?? '') ||
     prompt !== (agent?.systemPrompt ?? '') ||
     tier !== (agent?.modelTier ?? 'balanced') ||
-    servers !== (agent?.mcpServers ?? []).join(', ') ||
     maxSteps !== (agent?.maxSteps?.toString() ?? '') ||
     maxCost !== (agent?.maxCostUsd?.toString() ?? '')
 
@@ -65,10 +69,6 @@ export function AgentEditor({
       name,
       systemPrompt: prompt,
       modelTier: tier,
-      mcpServers: servers
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean),
       // Empty means "use Bloom's own ceiling", which is null rather than zero.
       maxSteps: maxSteps.trim() === '' ? null : Number(maxSteps),
       maxCostUsd: maxCost.trim() === '' ? null : Number(maxCost),
@@ -149,10 +149,6 @@ export function AgentEditor({
         {!MODEL_TIERS.includes(tier) && (
           <Field value={tier} onChange={setTier} placeholder="anthropic/claude-sonnet-4.6" />
         )}
-      </Row>
-
-      <Row label="Servers" hint="Peer MCP servers it may call, comma separated.">
-        <Field value={servers} onChange={setServers} placeholder="amber, finance" />
       </Row>
 
       <Row label="At most" hint="Blank uses Bloom's own ceiling. Bloom never raises these.">
