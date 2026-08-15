@@ -76,3 +76,22 @@ export function ApertureMark({ className }: IconProps): React.JSX.Element {
     </svg>
   )
 }
+
+/**
+ * Bloom: a stem opening into three petals — agents defined here, then sent out.
+ *
+ * Deliberately organic against the geometric rack and sliders: Bloom is the one tab
+ * whose contents you *author* rather than administer, and the odd one out in the
+ * column is doing its job.
+ */
+export function BloomIcon({ className }: IconProps): React.JSX.Element {
+  return (
+    <svg {...base} className={className}>
+      <path d="M10 17.5v-5" />
+      <circle cx="10" cy="10" r="2" />
+      <path d="M10 8a3.2 3.2 0 0 1 0-5.2A3.2 3.2 0 0 1 10 8Z" />
+      <path d="M11.8 11a3.2 3.2 0 0 1 4.6 2.4A3.2 3.2 0 0 1 11.8 11Z" />
+      <path d="M8.2 11a3.2 3.2 0 0 0-4.6 2.4A3.2 3.2 0 0 0 8.2 11Z" />
+    </svg>
+  )
+}

@@ -1,4 +1,27 @@
-import type { BloomErrorCode } from '../../shared/bloom'
+import type {
+  AgentConfig,
+  AgentConfigInput,
+  BloomErrorCode,
+  ConnectionInfo,
+  OAuthStart,
+  ProviderInfo,
+  RunSummary,
+  RunTrace,
+  TestRunStarted,
+  UsageReport,
+} from '../../shared/bloom'
+import {
+  fromAgentInput,
+  toAgentConfig,
+  toAgentConfigs,
+  toConnections,
+  toProviders,
+  toRunEvents,
+  toRunSummaries,
+  toRunSummary,
+  toTestRunStarted,
+  toUsage,
+} from './wire'
 
 /**
  * Talking to Bloom over HTTP.
@@ -207,4 +230,181 @@ export async function health(target: BloomTarget): Promise<BloomResult<HealthRep
  */
 export async function verifyToken(target: BloomTarget): Promise<BloomResult<unknown[]>> {
   return request<unknown[]>(target, '/admin/agents', { timeoutMs: 6_000 })
+}
+
+// --- the management surface -------------------------------------------------
+//
+// One function per endpoint, each mapping Bloom's spelling into ours on the way
+// through. Nothing below decides anything about the *link* — that mapping lives in
+// `link.ts::noteResult`, in one place, so a 404 on one agent can never be mistaken
+// for the backend being down.
+
+function map<T, U>(result: BloomResult<T>, fn: (value: T) => U): BloomResult<U> {
+  return result.ok ? { ok: true, value: fn(result.value) } : result
+}
+
+export async function listAgents(target: BloomTarget): Promise<BloomResult<AgentConfig[]>> {
+  return map(await request<unknown>(target, '/admin/agents'), toAgentConfigs)
+}
+
+export async function getAgent(
+  target: BloomTarget,
+  id: string,
+): Promise<BloomResult<AgentConfig | null>> {
+  return map(await request<unknown>(target, `/admin/agents/${encodeURIComponent(id)}`), toAgentConfig)
+}
+
+export async function createAgent(
+  target: BloomTarget,
+  input: AgentConfigInput,
+): Promise<BloomResult<AgentConfig | null>> {
+  const result = await request<unknown>(target, '/admin/agents', {
+    method: 'POST',
+    body: fromAgentInput(input as Record<string, unknown>),
+  })
+  return map(result, toAgentConfig)
+}
+
+export async function updateAgent(
+  target: BloomTarget,
+  id: string,
+  input: AgentConfigInput,
+): Promise<BloomResult<AgentConfig | null>> {
+  const result = await request<unknown>(target, `/admin/agents/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: fromAgentInput(input as Record<string, unknown>),
+  })
+  return map(result, toAgentConfig)
+}
+
+export async function deleteAgent(target: BloomTarget, id: string): Promise<BloomResult<void>> {
+  return request<void>(target, `/admin/agents/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export async function startTestRun(
+  target: BloomTarget,
+  agentId: string,
+  input: string,
+): Promise<BloomResult<TestRunStarted | null>> {
+  const result = await request<unknown>(
+    target,
+    `/admin/agents/${encodeURIComponent(agentId)}/test-run`,
+    { method: 'POST', body: { input } },
+  )
+  return map(result, toTestRunStarted)
+}
+
+/**
+ * Ask a run to stop.
+ *
+ * Bloom answers 202 and the *outcome* arrives on the trace as a normal
+ * `run_finished`, so nothing here waits for it — a caller watching the stream needs
+ * no special case for stopping.
+ */
+export async function cancelRun(target: BloomTarget, runId: string): Promise<BloomResult<unknown>> {
+  return request<unknown>(target, `/admin/runs/${encodeURIComponent(runId)}/cancel`, {
+    method: 'POST',
+  })
+}
+
+/** Every agent's runs, newest first — the activity feed. */
+export async function listRuns(
+  target: BloomTarget,
+  params: { limit?: number; offset?: number; status?: string; origin?: string } = {},
+): Promise<BloomResult<RunSummary[]>> {
+  return map(await request<unknown>(target, '/admin/runs', { query: params }), toRunSummaries)
+}
+
+export async function listAgentRuns(
+  target: BloomTarget,
+  agentId: string,
+  params: { limit?: number; offset?: number } = {},
+): Promise<BloomResult<RunSummary[]>> {
+  const result = await request<unknown>(
+    target,
+    `/admin/agents/${encodeURIComponent(agentId)}/runs`,
+    { query: params },
+  )
+  return map(result, toRunSummaries)
+}
+
+/**
+ * A finished run's trace.
+ *
+ * Normalised into exactly the shape the live stream produces, so one component
+ * renders both and the renderer never learns two vocabularies for one thing.
+ */
+export async function runTrace(
+  target: BloomTarget,
+  agentId: string,
+  runId: string,
+  after = 0,
+): Promise<BloomResult<RunTrace | null>> {
+  const result = await request<{ run?: unknown; events?: unknown }>(
+    target,
+    `/admin/agents/${encodeURIComponent(agentId)}/runs/${encodeURIComponent(runId)}/trace`,
+    { query: { after } },
+  )
+  return map(result, (value) => {
+    const run = toRunSummary(value?.run)
+    return run ? { run, events: toRunEvents(value?.events, runId) } : null
+  })
+}
+
+export async function listProviders(target: BloomTarget): Promise<BloomResult<ProviderInfo[]>> {
+  return map(await request<unknown>(target, '/admin/oauth/providers'), toProviders)
+}
+
+export async function listConnections(
+  target: BloomTarget,
+  agentId: string,
+): Promise<BloomResult<ConnectionInfo[]>> {
+  const result = await request<unknown>(
+    target,
+    `/admin/agents/${encodeURIComponent(agentId)}/oauth`,
+  )
+  return map(result, toConnections)
+}
+
+export async function startOAuth(
+  target: BloomTarget,
+  agentId: string,
+  provider: string,
+  scopes?: string[],
+): Promise<BloomResult<OAuthStart | null>> {
+  const result = await request<Record<string, unknown>>(
+    target,
+    `/admin/agents/${encodeURIComponent(agentId)}/oauth/${encodeURIComponent(provider)}/start`,
+    { method: 'POST', body: scopes ? { scopes } : {} },
+  )
+  return map(result, (value) =>
+    value
+      ? {
+          authorizeUrl: String(value.authorize_url ?? ''),
+          state: String(value.state ?? ''),
+          expiresAt: String(value.expires_at ?? ''),
+          scopes: Array.isArray(value.scopes) ? (value.scopes as string[]) : [],
+          redirectUri: String(value.redirect_uri ?? ''),
+        }
+      : null,
+  )
+}
+
+export async function disconnectProvider(
+  target: BloomTarget,
+  agentId: string,
+  provider: string,
+): Promise<BloomResult<void>> {
+  return request<void>(
+    target,
+    `/admin/agents/${encodeURIComponent(agentId)}/oauth/${encodeURIComponent(provider)}`,
+    { method: 'DELETE' },
+  )
+}
+
+export async function usage(
+  target: BloomTarget,
+  since?: string,
+): Promise<BloomResult<UsageReport | null>> {
+  return map(await request<unknown>(target, '/admin/usage', { query: { since } }), toUsage)
 }

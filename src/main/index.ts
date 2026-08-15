@@ -5,6 +5,7 @@ import type { ApertureEvent } from '../shared/types'
 import { AmberConnection } from './amber/connection'
 import { ToolBridge } from './amber/tool-bridge'
 import { verifyLink } from './bloom/link'
+import { closeAllRunStreams } from './bloom/run-stream'
 import { getSettings } from './config'
 import { registerIpc } from './ipc'
 import { closeAllShells } from './ssh/ssh-client'
@@ -86,6 +87,7 @@ app.on('window-all-closed', () => {
   // quitting, on every platform. Amber's session is resumable, so nothing is lost.
   bridge?.abortAll()
   closeAllShells()
+  closeAllRunStreams()
   amber?.disconnect()
   app.quit()
 })

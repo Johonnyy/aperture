@@ -1,6 +1,16 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 
-import type { BloomLink } from '../shared/bloom'
+import type {
+  AgentConfig,
+  AgentConfigInput,
+  BloomErrorCode,
+  BloomLink,
+  ConnectionInfo,
+  ProviderInfo,
+  RunSummary,
+  RunTrace,
+  UsageReport,
+} from '../shared/bloom'
 import { IPC } from '../shared/ipc'
 import type {
   ApertureEvent,
@@ -20,6 +30,18 @@ export interface ShellMessage {
   data?: string
   closed?: true
 }
+
+/**
+ * Every Bloom call's result.
+ *
+ * The house `{ ok, error? }` shape with the error *code* kept alongside the message.
+ * The message is what a human reads; the code is what the UI branches on, and here
+ * that distinction earns its keep — a pruned run, a restarting Bloom and a taken
+ * slug all need different words and different next steps.
+ */
+export type BloomCall<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: string; code: BloomErrorCode }
 
 /**
  * The entire privileged surface the renderer can reach.
@@ -197,6 +219,60 @@ const api = {
     unlink: (): Promise<BloomLink> => ipcRenderer.invoke(IPC.BLOOM_UNLINK),
     /** Re-check reachability and the key now. Cannot unlink, only demote. */
     verify: (): Promise<BloomLink> => ipcRenderer.invoke(IPC.BLOOM_VERIFY),
+
+    // Every call below answers `{ ok, value }` or `{ ok: false, error, code }`.
+    // `code` is worth branching on: `not_found` is a pruned run, `unavailable` is a
+    // Bloom that is restarting, `conflict` is a slug already taken.
+    agents: (): Promise<BloomCall<AgentConfig[]>> => ipcRenderer.invoke(IPC.BLOOM_AGENTS),
+    createAgent: (input: AgentConfigInput): Promise<BloomCall<AgentConfig | null>> =>
+      ipcRenderer.invoke(IPC.BLOOM_AGENT_CREATE, input),
+    updateAgent: (id: string, input: AgentConfigInput): Promise<BloomCall<AgentConfig | null>> =>
+      ipcRenderer.invoke(IPC.BLOOM_AGENT_UPDATE, id, input),
+    deleteAgent: (id: string): Promise<BloomCall<void>> =>
+      ipcRenderer.invoke(IPC.BLOOM_AGENT_DELETE, id),
+
+    /**
+     * Start a run. Returns as soon as Bloom has named it — the run itself continues,
+     * and its trace arrives as `bloom-run` events on the main event stream.
+     */
+    testRun: (agentId: string, input: string): Promise<BloomCall<{ runId: string }>> =>
+      ipcRenderer.invoke(IPC.BLOOM_TEST_RUN, agentId, input),
+    /** Ask a run to stop. The outcome still arrives as a normal terminal event. */
+    cancelRun: (runId: string): Promise<BloomCall<unknown>> =>
+      ipcRenderer.invoke(IPC.BLOOM_CANCEL_RUN, runId),
+    /** Attach to a run already in flight. Idempotent. */
+    watchRun: (runId: string): Promise<boolean> => ipcRenderer.invoke(IPC.BLOOM_WATCH_RUN, runId),
+
+    runs: (params?: {
+      limit?: number
+      offset?: number
+      status?: string
+      origin?: string
+    }): Promise<BloomCall<RunSummary[]>> => ipcRenderer.invoke(IPC.BLOOM_RUNS, params ?? {}),
+    agentRuns: (
+      agentId: string,
+      params?: { limit?: number; offset?: number },
+    ): Promise<BloomCall<RunSummary[]>> =>
+      ipcRenderer.invoke(IPC.BLOOM_AGENT_RUNS, agentId, params ?? {}),
+    /** A finished run's trace, in the same shape the live stream produces. */
+    trace: (agentId: string, runId: string, after?: number): Promise<BloomCall<RunTrace | null>> =>
+      ipcRenderer.invoke(IPC.BLOOM_TRACE, agentId, runId, after ?? 0),
+
+    providers: (): Promise<BloomCall<ProviderInfo[]>> => ipcRenderer.invoke(IPC.BLOOM_PROVIDERS),
+    connections: (agentId: string): Promise<BloomCall<ConnectionInfo[]>> =>
+      ipcRenderer.invoke(IPC.BLOOM_CONNECTIONS, agentId),
+    /** Opens the provider's page in the system browser and returns immediately. */
+    startOAuth: (
+      agentId: string,
+      provider: string,
+      scopes?: string[],
+    ): Promise<BloomCall<{ opened: boolean }>> =>
+      ipcRenderer.invoke(IPC.BLOOM_OAUTH_START, agentId, provider, scopes),
+    disconnect: (agentId: string, provider: string): Promise<BloomCall<void>> =>
+      ipcRenderer.invoke(IPC.BLOOM_OAUTH_DISCONNECT, agentId, provider),
+
+    usage: (since?: string): Promise<BloomCall<UsageReport | null>> =>
+      ipcRenderer.invoke(IPC.BLOOM_USAGE, since),
   },
 
   bridge: {

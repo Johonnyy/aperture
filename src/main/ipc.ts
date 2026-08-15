@@ -1,7 +1,7 @@
 import { BrowserWindow, ipcMain, nativeTheme } from 'electron'
 import { randomUUID } from 'node:crypto'
 
-import type { BloomLink } from '../shared/bloom'
+import type { AgentConfigInput, BloomLink } from '../shared/bloom'
 import { IPC } from '../shared/ipc'
 import { paletteFor } from '../shared/theme'
 import type {
@@ -13,6 +13,7 @@ import type {
 } from '../shared/types'
 import type { AmberConnection } from './amber/connection'
 import type { ToolBridge } from './amber/tool-bridge'
+import * as bloomApi from './bloom'
 import * as bloom from './bloom/link'
 import {
   addServer,
@@ -314,6 +315,53 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
     await bloom.verifyLink(emit)
     return bloom.getLink()
   })
+
+  // Everything below resolves credentials, calls Bloom, and lets the outcome move
+  // the link's state — see `bloom/index.ts`. Results carry `code` as well as a
+  // message, because the renderer has to tell a pruned run from a restarting Bloom
+  // from a slug that is already taken.
+
+  ipcMain.handle(IPC.BLOOM_AGENTS, () => bloomApi.listAgents(emit))
+  ipcMain.handle(IPC.BLOOM_AGENT_CREATE, (_e, input: AgentConfigInput) =>
+    bloomApi.createAgent(emit, input),
+  )
+  ipcMain.handle(IPC.BLOOM_AGENT_UPDATE, (_e, id: string, input: AgentConfigInput) =>
+    bloomApi.updateAgent(emit, id, input),
+  )
+  ipcMain.handle(IPC.BLOOM_AGENT_DELETE, (_e, id: string) => bloomApi.deleteAgent(emit, id))
+
+  /** Starts the run *and* opens its stream; events arrive as `bloom-run`. */
+  ipcMain.handle(IPC.BLOOM_TEST_RUN, (_e, agentId: string, input: string) =>
+    bloomApi.startTestRun(emit, agentId, input),
+  )
+  ipcMain.handle(IPC.BLOOM_CANCEL_RUN, (_e, runId: string) => bloomApi.cancelRun(emit, runId))
+  ipcMain.handle(IPC.BLOOM_WATCH_RUN, (_e, runId: string) => bloomApi.watchRun(emit, runId))
+
+  ipcMain.handle(IPC.BLOOM_RUNS, (_e, params: Record<string, never>) =>
+    bloomApi.listRuns(emit, params ?? {}),
+  )
+  ipcMain.handle(IPC.BLOOM_AGENT_RUNS, (_e, agentId: string, params: Record<string, never>) =>
+    bloomApi.listAgentRuns(emit, agentId, params ?? {}),
+  )
+  ipcMain.handle(IPC.BLOOM_TRACE, (_e, agentId: string, runId: string, after?: number) =>
+    bloomApi.runTrace(emit, agentId, runId, after ?? 0),
+  )
+
+  ipcMain.handle(IPC.BLOOM_PROVIDERS, () => bloomApi.listProviders(emit))
+  ipcMain.handle(IPC.BLOOM_CONNECTIONS, (_e, agentId: string) =>
+    bloomApi.listConnections(emit, agentId),
+  )
+  /** Opens the authorize URL in the *system* browser — never an embedded window. */
+  ipcMain.handle(
+    IPC.BLOOM_OAUTH_START,
+    (_e, agentId: string, provider: string, scopes?: string[]) =>
+      bloomApi.startOAuth(emit, agentId, provider, scopes),
+  )
+  ipcMain.handle(IPC.BLOOM_OAUTH_DISCONNECT, (_e, agentId: string, provider: string) =>
+    bloomApi.disconnectProvider(emit, agentId, provider),
+  )
+
+  ipcMain.handle(IPC.BLOOM_USAGE, (_e, since?: string) => bloomApi.usage(emit, since))
 
   // --- audit ----------------------------------------------------------------
 

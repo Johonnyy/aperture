@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 
 import { useStore } from '../store'
-import { AmberIcon, ServerIcon, SlidersIcon } from './icons'
+import { AmberIcon, BloomIcon, ServerIcon, SlidersIcon } from './icons'
 
-export type View = 'chat' | 'ssh' | 'settings'
+export type View = 'chat' | 'ssh' | 'settings' | 'bloom'
 
 interface NavItem {
   id: View
@@ -14,9 +14,15 @@ interface NavItem {
 /**
  * Apps land here as they're built (finance, school, …), nested under Amber
  * because she's how you reach them — each one is a backend she can query, not a
- * peer of hers. Empty for now; the group renders Amber alone until it isn't.
+ * peer of hers.
+ *
+ * Bloom is the first, and the first row in this column that is *conditional*: it
+ * appears only once a link record exists. Note that is "linked", not "reachable" —
+ * a stopped Bloom keeps its tab and explains itself inside, because hiding the tab
+ * would make an outage look like an uninstall and put the fix somewhere you can no
+ * longer reach.
  */
-const AMBER_APPS: NavItem[] = []
+const BLOOM: NavItem = { id: 'bloom', label: 'Bloom', icon: BloomIcon }
 
 const AMBER: NavItem = { id: 'chat', label: 'Amber', icon: AmberIcon }
 const SERVERS: NavItem = { id: 'ssh', label: 'Servers', icon: ServerIcon }
@@ -52,6 +58,9 @@ export function Sidebar({
 }): React.JSX.Element {
   const connState = useStore((s) => s.connection.state)
   const connected = connState === 'open'
+  // Presence, not health: every state but `unlinked` keeps the row. Seeded from argv
+  // before first paint so the row does not appear a frame late and reflow the nav.
+  const bloomLinked = useStore((s) => s.bloomLink.state) !== 'unlinked'
 
   return (
     <nav
@@ -81,16 +90,15 @@ export function Sidebar({
           onClick={() => onNavigate(AMBER.id)}
         />
 
-        {AMBER_APPS.map((app) => (
+        {bloomLinked && (
           <NavButton
-            key={app.id}
-            item={app}
-            active={view === app.id}
+            item={BLOOM}
+            active={view === BLOOM.id}
             collapsed={collapsed}
             nested
-            onClick={() => onNavigate(app.id)}
+            onClick={() => onNavigate(BLOOM.id)}
           />
-        ))}
+        )}
 
         <hr className="my-2 border-0 border-t border-line" />
 

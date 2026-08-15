@@ -56,4 +56,25 @@ export const IPC = {
   BLOOM_UNLINK: 'bloom:unlink',
   /** Re-check reachability and the token now, rather than waiting for a call. */
   BLOOM_VERIFY: 'bloom:verify',
+
+  BLOOM_AGENTS: 'bloom:agents',
+  BLOOM_AGENT_CREATE: 'bloom:agent-create',
+  BLOOM_AGENT_UPDATE: 'bloom:agent-update',
+  BLOOM_AGENT_DELETE: 'bloom:agent-delete',
+
+  /** Starts the run *and* opens its stream — see `main/bloom/run-stream.ts`. */
+  BLOOM_TEST_RUN: 'bloom:test-run',
+  BLOOM_CANCEL_RUN: 'bloom:cancel-run',
+  /** Attach to a run already in flight, e.g. after reopening the tab. */
+  BLOOM_WATCH_RUN: 'bloom:watch-run',
+  BLOOM_RUNS: 'bloom:runs',
+  BLOOM_AGENT_RUNS: 'bloom:agent-runs',
+  BLOOM_TRACE: 'bloom:trace',
+
+  BLOOM_PROVIDERS: 'bloom:providers',
+  BLOOM_CONNECTIONS: 'bloom:connections',
+  BLOOM_OAUTH_START: 'bloom:oauth-start',
+  BLOOM_OAUTH_DISCONNECT: 'bloom:oauth-disconnect',
+
+  BLOOM_USAGE: 'bloom:usage',
 } as const

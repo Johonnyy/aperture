@@ -11,13 +11,15 @@
     "build": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "verify": "npm run verify:connection && npm run verify:install && npm run verify:typeahead && npm run verify:theme && npm run verify:bloom-keys && npm run verify:bloom-client",
+    "verify": "npm run verify:connection && npm run verify:install && npm run verify:typeahead && npm run verify:theme && npm run verify:bloom-keys && npm run verify:bloom-wire && npm run verify:bloom-client && npm run verify:bloom-stream",
     "verify:theme": "esbuild src/shared/theme.ts --bundle --platform=node --format=esm --outfile=out/verify/theme.mjs && node scripts/verify-theme.mjs",
     "verify:typeahead": "esbuild src/renderer/ssh/typeahead.ts --bundle --platform=node --format=esm --outfile=out/verify/typeahead.mjs && node scripts/verify-typeahead.mjs",
     "verify:connection": "esbuild src/main/amber/connection.ts --bundle --platform=node --format=esm --external:ws --outfile=out/verify/connection.mjs && node scripts/verify-connection.mjs",
     "verify:install": "esbuild src/main/ssh/authorized-keys.ts --bundle --platform=node --format=esm --outfile=out/verify/authorized-keys.mjs && node scripts/verify-install-command.mjs",
     "verify:bloom-keys": "esbuild src/main/bloom/keys.ts --bundle --platform=node --format=esm --outfile=out/verify/bloom-keys.mjs && node scripts/verify-bloom-keys.mjs",
-    "verify:bloom-client": "esbuild src/main/bloom/client.ts --bundle --platform=node --format=esm --outfile=out/verify/client.mjs && node scripts/verify-bloom-client.mjs"
+    "verify:bloom-client": "esbuild src/main/bloom/client.ts --bundle --platform=node --format=esm --outfile=out/verify/client.mjs && node scripts/verify-bloom-client.mjs",
+    "verify:bloom-wire": "esbuild src/main/bloom/wire.ts --bundle --platform=node --format=esm --outfile=out/verify/bloom-wire.mjs && node scripts/verify-bloom-wire.mjs",
+    "verify:bloom-stream": "esbuild src/main/bloom/run-stream.ts --bundle --platform=node --format=esm --outfile=out/verify/run-stream.mjs && node scripts/verify-bloom-stream.mjs"
   },
   "dependencies": {
     "ssh2": "^1.16.0",

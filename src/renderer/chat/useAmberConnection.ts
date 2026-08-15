@@ -16,6 +16,7 @@ export function useAmberConnection() {
   const addUserMessage = useStore((s) => s.addUserMessage)
   const setSettings = useStore((s) => s.setSettings)
   const setAudit = useStore((s) => s.setAudit)
+  const setBloomLink = useStore((s) => s.setBloomLink)
   const playAudio = useStore((s) => s.settings.playAudio)
 
   const [speaking, setSpeaking] = useState(false)
@@ -34,6 +35,9 @@ export function useAmberConnection() {
   useEffect(() => {
     void window.aperture.settings.get().then(setSettings)
     void window.aperture.audit.list().then(setAudit)
+    // The record on disk, correcting the argv seed the sidebar painted with. Cheap
+    // and local — main answers it without touching the network.
+    void window.aperture.bloom.link().then(setBloomLink)
 
     const unsubscribe = window.aperture.amber.onEvent((event) => {
       if (event.kind === 'audio') {
@@ -62,7 +66,7 @@ export function useAmberConnection() {
       queueRef.current?.stop()
       micRef.current?.release()
     }
-  }, [ingest, setSettings, setAudit])
+  }, [ingest, setSettings, setAudit, setBloomLink])
 
   const sendText = useCallback(
     async (text: string) => {

@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
+import { BloomView } from './bloom/BloomView'
 import { ChatView } from './chat/ChatView'
 import { useAmberConnection } from './chat/useAmberConnection'
 import { Sidebar, useSidebarCollapsed, type View } from './nav/Sidebar'
@@ -7,6 +8,7 @@ import { TitleBar } from './nav/TitleBar'
 import { SettingsView } from './settings/SettingsView'
 import { SshView } from './ssh/SshView'
 import { StatusPanel } from './status/StatusPanel'
+import { useStore } from './store'
 import { useThemeSync } from './theme'
 
 export function App(): React.JSX.Element {
@@ -18,6 +20,15 @@ export function App(): React.JSX.Element {
   // Owned here because the toggle lives in the title bar and the width it drives
   // lives in the sidebar.
   const [collapsed, toggleCollapsed] = useSidebarCollapsed()
+
+  const bloomLinked = useStore((s) => s.bloomLink.state) !== 'unlinked'
+  // Only an explicit unlink can hide the tab, so this is a narrow guard rather than
+  // a general one — but without it, unlinking while looking at Bloom leaves `<main>`
+  // rendering nothing but the Status Panel. Deliberately keyed on `unlinked` alone:
+  // an unreachable Bloom keeps its tab, or a flaky network would eject you mid-edit.
+  useEffect(() => {
+    if (view === 'bloom' && !bloomLinked) setView('chat')
+  }, [view, bloomLinked])
 
   return (
     <div className="flex h-full flex-col">
@@ -37,6 +48,12 @@ export function App(): React.JSX.Element {
               chat would cost you your shells. */}
           <div className={view === 'ssh' ? 'flex min-h-0 min-w-0 flex-1' : 'hidden'}>
             <SshView />
+          </div>
+          {/* Mounted-but-hidden like Chat and Servers, not unmounted like Settings:
+              a run in flight has a scroll position and expanded tool cards that must
+              survive a glance at the chat. */}
+          <div className={view === 'bloom' ? 'flex min-h-0 min-w-0 flex-1' : 'hidden'}>
+            {bloomLinked && <BloomView />}
           </div>
           {view === 'settings' && <SettingsView />}
 

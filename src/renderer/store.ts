@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 
+import { EMPTY_BLOOM_LINK, type BloomLink, type BloomRunEvent } from '../shared/bloom'
 import type { ServerFrame } from '../shared/protocol'
 import type {
   ApertureEvent,
@@ -27,6 +28,26 @@ export interface Message {
   streaming?: boolean
 }
 
+/**
+ * One Bloom run, live or replayed from history.
+ *
+ * Mirrors `OpLog` down to the nullable `done`, and for the same reason — but note
+ * `streamLost` is deliberately *not* `done`. A stream dying and a run failing are
+ * different facts: the run continues server-side and its outcome stays readable from
+ * the trace endpoint. Conflating them is the classic bug here, and it is the same
+ * distinction `finishOp` already draws between the narration and the result.
+ */
+export interface BloomRun {
+  events: BloomRunEvent[]
+  /** Null while it is still going. */
+  done: { status: string; error?: string } | null
+  /** Why we stopped watching, when we did. Never implies the run stopped. */
+  streamLost: string | null
+  /** The highest event id seen, so a replay after a reconnect cannot double-render. */
+  lastId: number
+  agentId: string | null
+}
+
 interface State {
   connection: ConnectionStatus
   settings: Settings
@@ -41,8 +62,20 @@ interface State {
   /** Amber asked something and wants an answer — keep the mic open. */
   awaitingResponse: boolean
   lastError: { message: string; code?: string } | null
+  /** Where we stand with Bloom. Drives whether its sidebar row exists at all. */
+  bloomLink: BloomLink
+  /** Keyed by run id; several runs can be in flight at once. */
+  bloomRuns: Record<string, BloomRun>
 
   ingest: (event: ApertureEvent) => void
+  setBloomLink: (link: BloomLink) => void
+  /** Fill a bucket from a historical trace. A merge, never a reset — see `ingest`. */
+  hydrateRun: (
+    runId: string,
+    agentId: string,
+    events: BloomRunEvent[],
+    done: { status: string; error?: string } | null,
+  ) => void
   setSettings: (settings: Settings) => void
   setAudit: (entries: AuditEntry[]) => void
   addUserMessage: (text: string) => void
@@ -85,10 +118,50 @@ export const useStore = create<State>((set) => ({
   thinking: false,
   awaitingResponse: false,
   lastError: null,
+  // Seeded from argv before first paint (see preload), then corrected by the record
+  // on disk a moment later. The default matters: `unlinked` means no sidebar row, so
+  // an app with no Bloom never flashes one.
+  bloomLink: {
+    ...EMPTY_BLOOM_LINK,
+    state: window.aperture?.bloom?.linkedAtLaunch ? 'linked' : 'unlinked',
+  },
+  bloomRuns: {},
 
   setSettings: (settings) => set({ settings }),
   setAudit: (audit) => set({ audit }),
+  setBloomLink: (bloomLink) => set({ bloomLink }),
   clearError: () => set({ lastError: null }),
+
+  /**
+   * Fill a run's bucket from a historical trace.
+   *
+   * A **merge**, not a reset: main opens a live stream before the `test-run` promise
+   * resolves, so events can already be in the bucket when this runs. Dedup is by
+   * event id, which is also what makes a post-reconnect replay harmless.
+   */
+  hydrateRun: (runId, agentId, events, done) =>
+    set((s) => {
+      const existing = s.bloomRuns[runId]
+      const merged = new Map<number, BloomRunEvent>()
+      for (const event of [...(existing?.events ?? []), ...events]) {
+        // Synthetic stream events carry negative ids and must not collide, so they
+        // are keyed by position rather than by id.
+        merged.set(event.id > 0 ? event.id : -(merged.size + 1_000_000), event)
+      }
+      const ordered = [...merged.values()].sort((a, b) => a.id - b.id)
+      return {
+        bloomRuns: {
+          ...s.bloomRuns,
+          [runId]: {
+            events: ordered,
+            done: done ?? existing?.done ?? null,
+            streamLost: existing?.streamLost ?? null,
+            lastId: ordered.reduce((max, e) => Math.max(max, e.id), 0),
+            agentId,
+          },
+        },
+      }
+    }),
 
   startOp: (opId) =>
     set((s) => ({ ops: { ...s.ops, [opId]: { entries: [], done: null } } })),
@@ -172,6 +245,10 @@ export const useStore = create<State>((set) => ({
               },
             },
           }
+        case 'bloom-link':
+          return { bloomLink: event.link }
+        case 'bloom-run':
+          return reduceBloomRun(s, event.runId, event.event)
         case 'frame':
           return reduceFrame(s, event.frame)
         case 'audio':
@@ -181,6 +258,83 @@ export const useStore = create<State>((set) => ({
       }
     }),
 }))
+
+/**
+ * One Bloom run event: into its own bucket, and — sparsely — into the shared trace.
+ *
+ * **Both, from one reducer**, exactly as `reduceFrame` returns `{ messages, trace }`.
+ * Emitting a second event from main to narrate would double the traffic and put the
+ * mapping in the wrong process.
+ *
+ * The Status Panel's `trace` is reused rather than given a Bloom-shaped twin.
+ * `TraceEntry` describes itself as "an ephemeral view of a turn unfolding", which a
+ * Bloom run is; a second array would mean a second cap, a second autoscroll and an
+ * argument about which half gets the height. And interleaving is the *point* —
+ * Amber is eventually what kicks off a run, and two columns would put cause and
+ * effect side by side.
+ *
+ * Which is why the mapping is sparse: `text` and `step_finished` contribute nothing.
+ * A chatty run would otherwise drown Amber's own narration in the same column.
+ */
+function reduceBloomRun(s: State, runId: string, event: BloomRunEvent): Partial<State> {
+  const existing = s.bloomRuns[runId]
+
+  // A replay after a reconnect re-sends everything from the cursor. Bloom's
+  // `Last-Event-ID` handling is exact, but one comparison removes an entire class of
+  // double-rendered tool calls if it ever is not.
+  if (existing && event.id > 0 && event.id <= existing.lastId) return {}
+
+  const events = [...(existing?.events ?? []), event]
+  const done =
+    event.kind === 'run_finished'
+      ? {
+          status: String(event.payload.status ?? 'succeeded'),
+          error: (event.payload.error as string | undefined) ?? undefined,
+        }
+      : (existing?.done ?? null)
+
+  const next: BloomRun = {
+    events,
+    done,
+    // A lost stream never sets `done` — the run is very likely still going.
+    streamLost: event.kind === 'stream_lost' ? String(event.payload.detail ?? 'Lost contact.') : null,
+    lastId: Math.max(existing?.lastId ?? 0, event.id),
+    agentId: existing?.agentId ?? null,
+  }
+
+  const line = traceLineFor(event)
+  return {
+    bloomRuns: { ...s.bloomRuns, [runId]: next },
+    ...(line ? { trace: [...s.trace, line].slice(-TRACE_CAP) } : {}),
+  }
+}
+
+/** The sparse half of the mapping above. Returns null for anything not worth a line. */
+function traceLineFor(event: BloomRunEvent): TraceEntry | null {
+  switch (event.kind) {
+    case 'run_started':
+      return trace('info', `bloom: run started — ${event.payload.agent_slug ?? 'agent'}`)
+    case 'tool_started':
+      return trace('info', `bloom: ${event.toolName ?? 'tool'}…`)
+    case 'tool_finished':
+      return trace(
+        event.ok === false ? 'error' : 'info',
+        `bloom: ${event.toolName ?? 'tool'} ${event.ok === false ? 'failed' : 'ok'}`,
+        event.latencyMs === null ? undefined : `${event.latencyMs}ms`,
+      )
+    case 'run_finished':
+      return trace(
+        event.payload.status === 'succeeded' ? 'info' : 'warn',
+        `bloom: run ${event.payload.status ?? 'finished'}`,
+        (event.payload.error as string | undefined) ?? undefined,
+      )
+    case 'stream_lost':
+      return trace('error', 'bloom: lost contact with a run', String(event.payload.detail ?? ''))
+    default:
+      // `text` and `step_finished` deliberately contribute nothing.
+      return null
+  }
+}
 
 function reduceFrame(s: State, frame: ServerFrame): Partial<State> {
   const push = (entry: TraceEntry): TraceEntry[] => [...s.trace, entry].slice(-TRACE_CAP)
