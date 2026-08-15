@@ -133,6 +133,13 @@ export function SettingsView(): React.JSX.Element {
       />
 
       <Toggle
+        label="Advanced mode"
+        hint="Show every action the Servers tab can run — pin and roll back an image, rename, edit env vars directly, the registry, backups and the deploy journal. Off, it offers install, update, restart and remove."
+        checked={draft.advancedMode}
+        onChange={(advancedMode) => setDraft({ ...draft, advancedMode })}
+      />
+
+      <Toggle
         label="Confirm before running commands"
         hint="Amber-initiated SSH commands wait for your approval in the status panel. Leave this on until you trust the pattern."
         checked={draft.confirmBeforeExec}

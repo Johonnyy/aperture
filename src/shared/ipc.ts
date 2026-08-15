@@ -38,6 +38,25 @@ export const IPC = {
   INFRA_STATUS: 'infra:status',
   INFRA_RUN: 'infra:run',
   INFRA_CANCEL: 'infra:cancel',
+  /**
+   * Newest published version per repo. Separate from INFRA_STATUS on purpose: that is
+   * one SSH round trip and this is a GitHub call, so a slow or rate-limited GitHub
+   * must never make a reachable box look unreachable.
+   */
+  INFRA_RELEASES: 'infra:releases',
+
+  /**
+   * The credential vault.
+   *
+   * There is deliberately **no `keys:read`**. Nothing in the renderer can ask for a
+   * plaintext credential; a value is decrypted in main, inside `runAction`, and goes
+   * straight into the SSH heredoc. That absence is the design — please do not add one
+   * helpfully. The renderer passes `uid`s and never sees what they unlock.
+   */
+  KEYS_LIST: 'keys:list',
+  KEYS_SAVE: 'keys:save',
+  KEYS_UPDATE: 'keys:update',
+  KEYS_DELETE: 'keys:delete',
 
   BRIDGE_APPROVE: 'bridge:approve',
   BRIDGE_DENY: 'bridge:deny',

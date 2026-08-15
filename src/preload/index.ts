@@ -16,6 +16,7 @@ import type {
   ApertureEvent,
   AuditEntry,
   ConnectionStatus,
+  CredentialSummary,
   ExecResult,
   InfraStatus,
   KeyRecord,
@@ -23,6 +24,7 @@ import type {
   ServerConfig,
   Settings,
 } from '../shared/types'
+import type { ReleaseInfo } from '../shared/version'
 
 /** One frame of output from an interactive shell, or notice that it closed. */
 export interface ShellMessage {
@@ -156,6 +158,33 @@ const api = {
       subscribe<ShellMessage>(IPC.SHELL_DATA, cb),
   },
 
+  /**
+   * The credentials you own, so one saved key fills every app that needs it.
+   *
+   * A top-level namespace rather than something under `ssh`, deliberately:
+   * `ssh.listKeys` already means SSH key *pairs*, and an API key smuggled in beside
+   * them would render in the key manager as a fake keypair — the leaky abstraction
+   * `bloom/token-store.ts` warns about, one level up.
+   *
+   * There is no `read`. A value is decrypted in main, at the moment an install needs
+   * it, and goes straight into the SSH heredoc; it has no route to this process.
+   */
+  keys: {
+    list: (): Promise<{ credentials: CredentialSummary[]; available: boolean }> =>
+      ipcRenderer.invoke(IPC.KEYS_LIST),
+    /** Create, or replace the value of an existing one when `uid` is given. */
+    save: (input: {
+      uid?: string
+      credentialId: string
+      label: string
+      value: string
+    }): Promise<CredentialSummary> => ipcRenderer.invoke(IPC.KEYS_SAVE, input),
+    /** Rename or re-file without re-entering the value — the label is not the secret. */
+    update: (uid: string, patch: { label?: string; credentialId?: string }): Promise<void> =>
+      ipcRenderer.invoke(IPC.KEYS_UPDATE, uid, patch),
+    remove: (uid: string): Promise<void> => ipcRenderer.invoke(IPC.KEYS_DELETE, uid),
+  },
+
   infra: {
     /** One round trip: sudo reachability, whether amber-infra is here, and its report. */
     status: (
@@ -175,6 +204,13 @@ const api = {
      * script's own rehearsal — which is the whole reason a GUI over root shell
      * scripts is defensible: the GUI composes flags, the script proves them.
      */
+    /**
+     * The newest published version of each repo, cached in main for ten minutes.
+     * `force` is the "check now" path. A repo that cannot be resolved comes back with
+     * `latest: null` and a reason — never silently as "up to date".
+     */
+    releases: (repos: string[], force?: boolean): Promise<Record<string, ReleaseInfo>> =>
+      ipcRenderer.invoke(IPC.INFRA_RELEASES, repos, force),
     run: (
       opId: string,
       serverId: string,

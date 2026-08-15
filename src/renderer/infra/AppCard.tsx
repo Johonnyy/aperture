@@ -1,9 +1,12 @@
 import { useState } from 'react'
 
 import { containerExists } from '../../shared/bloom'
-import type { InfraApp } from '../../shared/types'
+import type { CredentialSummary, InfraApp } from '../../shared/types'
 import { EnvEditor } from './EnvEditor'
 import { Chip, Field, SmallButton } from './parts'
+import { Connections } from './Connections'
+import { fillsFor, readinessFor, ReadinessList, ReadinessSummary } from './Readiness'
+import { compareVersions, tagOf, type ReleaseInfo } from '../../shared/version'
 import type { Params } from './useRunner'
 
 /**
@@ -22,12 +25,34 @@ export function AppCard({
   app,
   run,
   onOpenTerminal,
+  advanced,
+  credentials,
+  onCredentialSaved,
+  release,
+  checkingRelease,
+  onCheckReleases,
+  defaults,
 }: {
   app: InfraApp
   run: (actionId: string, title: string, params?: Params) => void
   onOpenTerminal: () => void
+  /** Show the machinery: pin, roll back, rename, raw env, stop, logs. */
+  advanced: boolean
+  credentials: CredentialSummary[]
+  onCredentialSaved: () => void
+  /** The newest published version of this app, when its manifest names a repo. */
+  release?: ReleaseInfo
+  checkingRelease?: boolean
+  onCheckReleases?: () => void
+  /** What upstream and server would be if the stanza does not say. */
+  defaults?: { upstream?: string | null; server?: string | null }
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
+  const [chosen, setChosen] = useState<Record<string, string>>({})
+  const [purge, setPurge] = useState(false)
+  // Config values typed in the checklist, carried into the install as parameters.
+  // Not secrets, so they travel in `Params` and are visible in the operation log.
+  const [configs, setConfigs] = useState<Record<string, string>>({})
   const [image, setImage] = useState('')
   const [tag, setTag] = useState('')
   const [rename, setRename] = useState('')
@@ -65,6 +90,45 @@ export function AppCard({
     upstream: app.upstream ?? '',
   }
 
+  // What this app still needs, from its own manifest weighed against what secrets.yaml
+  // already holds and what the vault can supply. Null on a box whose status.sh predates
+  // manifests, in which case the env editor below is still the whole story.
+  const readiness = readinessFor(app.manifest, app.env, credentials)
+  const blocked = Boolean(readiness && readiness.missing.some((m) => m.required))
+  const composedInstall: Params = {
+    ...installParams,
+    fills: JSON.stringify(fillsFor(readiness, chosen)),
+    configs: JSON.stringify(configs),
+  }
+  // The three prefixes disagreeing is the failure this release exists to make visible:
+  // an app reading one namespace while its keys sit in another starts, serves and never
+  // registers, with nothing anywhere saying so.
+  /**
+   * Three versions now exist, and they mean different things:
+   *
+   *   pinned   what secrets.yaml / the compose file say to run
+   *   running  what the container is actually running — differs when the pin was
+   *            bumped and nothing restarted (the existing `drift` above)
+   *   latest   the newest published release
+   *
+   * So "restart to pick up the pin" and "a newer release exists" are different rows
+   * with different buttons, and conflating them would offer an update to a version
+   * already sitting on the disk.
+   *
+   * Watchtower apps are excluded from the Update button entirely: they run the moving
+   * `:stable` tag and update themselves, so a manual button would be fighting an
+   * auto-updater. `role` in the manifest is what makes that decidable.
+   */
+  const pinnedTag = tagOf(app.imagePinned)
+  const autoUpdates = app.manifest?.role === 'app'
+  const versus = compareVersions(pinnedTag, release?.latest ?? null)
+  const canUpdate = !notDeployed && !autoUpdates && versus === 'behind'
+
+  const prefixDrift =
+    app.envPrefix &&
+    ((app.envPrefixDeclared && app.envPrefixDeclared !== app.envPrefix) ||
+      (app.envPrefixRendered && app.envPrefixRendered !== app.envPrefix))
+
   return (
     <li className="rounded-panel border border-line bg-raised/50 p-3">
       <div className="flex flex-wrap items-center gap-3">
@@ -101,6 +165,28 @@ export function AppCard({
           <p className="truncate font-mono text-meta text-muted">
             {app.imagePinned ?? 'no pinned image'}
           </p>
+          {!notDeployed && (
+            <p className="truncate text-meta">
+              {autoUpdates ? (
+                <span className="text-muted">auto-updates via Watchtower</span>
+              ) : versus === 'behind' ? (
+                <span className="text-accent">
+                  v{pinnedTag} → v{release?.latest} available
+                </span>
+              ) : versus === 'up-to-date' ? (
+                <span className="text-muted">v{pinnedTag} · up to date</span>
+              ) : versus === 'ahead' ? (
+                <span className="text-muted">
+                  v{pinnedTag} · newer than the latest release (v{release?.latest})
+                </span>
+              ) : (
+                // Never "up to date". A check that could not run is not evidence.
+                <span className="text-muted" title={release?.error ?? 'not checked yet'}>
+                  {pinnedTag ? `v${pinnedTag} · ` : ''}latest unknown
+                </span>
+              )}
+            </p>
+          )}
           {drift && (
             <p className="truncate font-mono text-meta text-accent">
               running {app.imageRunning} — restart to pick up the pin
@@ -131,6 +217,14 @@ export function AppCard({
               </Chip>
             </>
           )}
+          {prefixDrift && (
+            <span
+              title={`manifest says ${app.envPrefix}; secrets.yaml says ${app.envPrefixDeclared ?? '—'}; the running .env uses ${app.envPrefixRendered ?? '—'}`}
+            >
+              <Chip tone="danger">prefix mismatch</Chip>
+            </span>
+          )}
+          {notDeployed && readiness && <ReadinessSummary readiness={readiness} />}
           {stopped && (
             <SmallButton
               primary
@@ -141,22 +235,82 @@ export function AppCard({
             </SmallButton>
           )}
           {notDeployed && (
+            // One button for the whole thing: declare, generate, fill from the vault,
+            // install — rehearsed against a scratch copy of secrets.yaml first. It
+            // used to be Declare, then Install, then Reconcile, in that order.
             <SmallButton
               primary
-              disabled={!app.domain}
+              disabled={!app.domain || blocked}
               title={
-                app.domain
-                  ? `Run install.sh --app ${app.name} --domain ${app.domain}`
-                  : 'No domain in secrets.yaml — enter the sudo password and re-read, or set one below'
+                blocked
+                  ? `Still needs ${readiness?.missing.map((m) => m.label).join(', ')}`
+                  : app.domain
+                    ? `Declare, generate its keys, fill saved ones, then install.sh --app ${app.name}`
+                    : 'No domain in secrets.yaml — enter the sudo password and re-read, or set one below'
               }
-              onClick={() => run('install', `Install ${app.name}`, installParams)}
+              onClick={() => run('installApp', `Install ${app.name}`, composedInstall)}
             >
               Install
+            </SmallButton>
+          )}
+          {canUpdate && (
+            // update-app.sh, not setImage + reconcile: it reverts to the last image
+            // this box actually saw healthy, which is what makes one click safe on a
+            // server you are not sitting at.
+            <SmallButton
+              primary
+              title={`Pin ${app.name} to ${release?.latest} and restart it, reverting if it does not come back healthy`}
+              onClick={() =>
+                run('updateApp', `Update ${app.name} to ${release?.latest}`, {
+                  ...params,
+                  tag: release?.latest ?? '',
+                })
+              }
+            >
+              Update
+            </SmallButton>
+          )}
+          {!notDeployed && !autoUpdates && versus === 'unknown' && onCheckReleases && (
+            <SmallButton
+              disabled={checkingRelease}
+              title={release?.error ?? 'Ask GitHub for the newest published version'}
+              onClick={onCheckReleases}
+            >
+              {checkingRelease ? 'Checking…' : 'Check'}
             </SmallButton>
           )}
           <SmallButton onClick={() => setOpen((o) => !o)}>{open ? 'Hide' : 'Manage'}</SmallButton>
         </div>
       </div>
+
+      {/* The checklist sits outside Manage: it is the thing you need before you press
+          the button beside it, not a detail you go looking for. */}
+      {notDeployed && readiness && readiness.items.length > 0 && (
+        <div className="mt-3 rounded-field border border-line bg-ground p-3">
+          <ReadinessList
+            readiness={readiness}
+            credentials={credentials}
+            chosen={chosen}
+            onChoose={(key, uid) => setChosen((c) => ({ ...c, [key]: uid }))}
+            onSaved={onCredentialSaved}
+            configs={configs}
+            onConfig={(key, value) => setConfigs((c) => ({ ...c, [key]: value }))}
+          />
+        </div>
+      )}
+
+      {/* Connected services, for an app whose credentials are discovered rather than
+          listed. Outside Manage and outside Advanced: adding a connection is an
+          ordinary thing to want, not machinery. */}
+      {!notDeployed && (
+        <Connections
+          app={app}
+          run={run}
+          credentials={credentials}
+          onCredentialSaved={onCredentialSaved}
+          disabled={false}
+        />
+      )}
 
       {open && (
         <div className="mt-3 flex flex-col gap-3 rounded-field border border-line bg-ground p-3">
@@ -164,9 +318,18 @@ export function AppCard({
               nothing produces a raw daemon error and an operation log that reads like
               a fault rather than an absence. `gone` is the reason, shown on hover. */}
           <Row label="Deploy">
-            {app.name === 'amber' && !notDeployed && (
-              <SmallButton onClick={() => run('updateAmber', 'Update Amber')}>
-                Update Amber
+            {/* Re-pull the tag that is already pinned, with the same revert-on-unhealthy
+                as the Update button above. Useful when a tag was force-pushed, or to
+                re-run the env reconcile after adding a key. `updateAmber` used to sit
+                here as an Amber-only special case; update-app.sh is the same script
+                generalised, and update-amber.sh is now a wrapper over it so the voice
+                trigger and the systemd path unit keep working. */}
+            {!notDeployed && (
+              <SmallButton
+                title="Pull the currently pinned tag again and restart, reverting if it does not come back"
+                onClick={() => run('updateApp', `Re-pull ${app.name}`, params)}
+              >
+                Re-pull pin
               </SmallButton>
             )}
             <SmallButton
@@ -213,13 +376,41 @@ export function AppCard({
               which is how a stale value from the example file survives an apex change
               and turns into a certificate request for a host you do not own. */}
           <Row label="Identity">
-            <Stanza app={app.name} field="domain" value={app.domain} run={run} />
+            <Stanza
+              app={app.name}
+              field="domain"
+              value={app.domain}
+              run={run}
+              hint="the hostname Caddy serves, and the exact name it asks Let's Encrypt for"
+            />
           </Row>
           <Row label="">
-            <Stanza app={app.name} field="upstream" value={app.upstream} run={run} />
-            <Stanza app={app.name} field="server" value={app.server} run={run} />
+            <Stanza
+              app={app.name}
+              field="upstream"
+              value={app.upstream}
+              fallback={defaults?.upstream}
+              run={run}
+              hint="where Caddy proxies to — the loopback port from this app's compose file"
+            />
+          </Row>
+          <Row label="">
+            <Stanza
+              app={app.name}
+              field="server"
+              value={app.server}
+              fallback={defaults?.server}
+              run={run}
+              hint="which box this app belongs to (infra.server). Blank means this one."
+            />
           </Row>
 
+          {/* Everything from here down is machinery. Behind Advanced mode, not because
+              it is dangerous but because it is rarely the answer: pinning an image by
+              hand, renaming, editing an env var directly. Deploy and Remove above are
+              the ordinary path. */}
+          {advanced && (
+          <>
           <Row label="Pin">
             <Field
               value={image}
@@ -289,7 +480,18 @@ export function AppCard({
             </span>
           </Row>
 
-          <Row label="Danger">
+          </>
+          )}
+
+          {/* One Remove, not two, and not five.
+              It stops the container, un-hooks the Caddy site, deregisters it, deletes
+              /etc/amber-infra/<app> AND removes its stanza and registry key — the last
+              of which used to be a separate `undeclareApp` you had to know to press,
+              which is why ghost entries accumulated.
+
+              Data is kept unless you tick the box. That default is deliberate in
+              uninstall.sh and a GUI must not quietly invert it. */}
+          <Row label="Remove">
             {configOnly ? (
               <>
                 <SmallButton
@@ -300,16 +502,40 @@ export function AppCard({
                 </SmallButton>
                 <span className="text-micro text-muted">
                   edits secrets.yaml only — there is nothing deployed to uninstall.
-                  Keeping it is what lets you install again later.
                 </span>
               </>
             ) : (
-              <SmallButton danger onClick={() => run('uninstall', `Remove ${app.name}`, params)}>
-                Remove app
-              </SmallButton>
+              <>
+                <SmallButton
+                  danger
+                  onClick={() =>
+                    run('removeApp', `Remove ${app.name}`, {
+                      ...params,
+                      purge: String(purge),
+                    })
+                  }
+                >
+                  Remove {app.name}
+                </SmallButton>
+                <label className="flex items-center gap-1.5 text-micro text-muted">
+                  <input
+                    type="checkbox"
+                    checked={purge}
+                    onChange={(e) => setPurge(e.target.checked)}
+                    className="accent-danger"
+                  />
+                  also delete its data volumes
+                </label>
+                <span className="text-micro text-muted">
+                  {purge
+                    ? 'Its database goes with it. Backups are still untouched.'
+                    : 'Keeps its volumes, so reinstalling picks up where it left off.'}
+                </span>
+              </>
             )}
           </Row>
 
+          {advanced && (
           <div className="border-t border-line pt-3">
             <div className="mb-2 flex items-center gap-2">
               <span className="w-16 shrink-0 text-meta text-muted">Env</span>
@@ -328,6 +554,7 @@ export function AppCard({
               </p>
             )}
           </div>
+          )}
         </div>
       )}
     </li>
@@ -335,18 +562,33 @@ export function AppCard({
 }
 
 /** One field of an app's stanza in secrets.yaml. Not a secret, so shown in the clear. */
+/**
+ * One field of an app's stanza in secrets.yaml. Not a secret, so shown in the clear.
+ *
+ * `fallback` is what the value would be if nobody set it — the loopback port out of
+ * the compose file, the box label out of `infra.server`. Before it existed these
+ * rendered as empty boxes labelled "upstream" and "server", which is a question with
+ * no visible answer: both are derivable, and neither is something to invent.
+ */
 function Stanza({
   app,
   field,
   value,
+  fallback,
+  hint,
   run,
 }: {
   app: string
   field: 'domain' | 'upstream' | 'server' | 'image'
   value: string | null
+  /** The derived default, prefilled when the stanza has not set one. */
+  fallback?: string | null
+  hint?: string
   run: (actionId: string, title: string, params?: Params) => void
 }): React.JSX.Element {
-  const [draft, setDraft] = useState(value ?? '')
+  const [draft, setDraft] = useState(value ?? fallback ?? '')
+  // Compared against the *stored* value, not the fallback: a prefilled default that
+  // has never been written is a change worth being able to save.
   const changed = draft !== (value ?? '')
   const save = (): void => {
     if (changed) run('setVar', `Set ${app}.${field}`, { app, field, value: draft })
@@ -362,6 +604,7 @@ function Stanza({
       <SmallButton disabled={!changed} onClick={save}>
         Save {field}
       </SmallButton>
+      {hint && <span className="text-micro text-muted">{hint}</span>}
     </>
   )
 }

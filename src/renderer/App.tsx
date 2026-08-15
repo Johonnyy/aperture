@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { BloomView } from './bloom/BloomView'
 import { ChatView } from './chat/ChatView'
 import { useAmberConnection } from './chat/useAmberConnection'
+import { KeysView } from './keys/KeysView'
 import { Sidebar, useSidebarCollapsed, type View } from './nav/Sidebar'
 import { TitleBar } from './nav/TitleBar'
 import { SettingsView } from './settings/SettingsView'
@@ -55,6 +56,7 @@ export function App(): React.JSX.Element {
           <div className={view === 'bloom' ? 'flex min-h-0 min-w-0 flex-1' : 'hidden'}>
             {bloomLinked && <BloomView />}
           </div>
+          {view === 'keys' && <KeysView />}
           {view === 'settings' && <SettingsView />}
 
           <StatusPanel />

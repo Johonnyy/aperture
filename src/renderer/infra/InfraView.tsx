@@ -3,6 +3,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { EXPECTED_SCHEMA, type InfraStatus, type ServerConfig } from '../../shared/types'
 import { AppCard } from './AppCard'
 import { Catalogue } from './Catalogue'
+import { useCredentials } from './Readiness'
+import type { ReleaseInfo } from '../../shared/version'
+import { useStore } from '../store'
 import { DnsRecords } from './Dns'
 import { Card, Chip, Field, SmallButton } from './parts'
 import { BloomCard } from './BloomCard'
@@ -40,6 +43,38 @@ export function InfraView({
   const [password, setPassword] = useState('')
   const [repo, setRepo] = useState(DEFAULT_REPO)
 
+  // The saved credentials, so an app row can say "3 of 4 ready" and fill the fourth
+  // in one click. Only uids ever leave this component — see `Readiness`.
+  const { credentials, refresh: refreshCredentials } = useCredentials()
+  // Off by default. See `Settings.advancedMode`: this decides how many buttons exist,
+  // which is a different question from how much the op log narrates.
+  const advanced = useStore((s) => s.settings.advancedMode)
+
+  // Newest published version per repo, resolved in main and cached there for ten
+  // minutes. Fired AFTER the status read rather than with it: the repo names come out
+  // of each app's manifest, so there is nothing to ask about until the box has
+  // answered. A failure here leaves the map empty and every row reads
+  // "latest unknown", which is the honest answer and never a green one.
+  const [releases, setReleases] = useState<Record<string, ReleaseInfo>>({})
+  const [checkingReleases, setCheckingReleases] = useState(false)
+
+  const checkReleases = useCallback(
+    async (from: InfraStatus | null, force = false) => {
+      const repos = [
+        ...(from?.apps ?? []).map((a) => a.manifest?.release?.repo),
+        ...(from?.catalogue ?? []).map((c) => c.manifest?.release?.repo),
+      ].filter((r): r is string => Boolean(r))
+      if (repos.length === 0) return
+      setCheckingReleases(true)
+      try {
+        setReleases(await window.aperture.infra.releases(repos, force))
+      } finally {
+        setCheckingReleases(false)
+      }
+    },
+    [],
+  )
+
   // Read through a ref so the runner's identity doesn't change on every keystroke
   // in the password field, which would remount the operation log mid-install.
   const passwordRef = useRef(password)
@@ -51,10 +86,12 @@ export function InfraView({
     setError(null)
     const res = await window.aperture.infra.status(server.id, passwordRef.current || undefined)
     setPasswordless(res.passwordlessSudo === true)
-    if (res.ok && res.status) setStatus(res.status)
-    else setError(res.error ?? 'Could not read the box.')
+    if (res.ok && res.status) {
+      setStatus(res.status)
+      void checkReleases(res.status)
+    } else setError(res.error ?? 'Could not read the box.')
     setLoading(false)
-  }, [server.id])
+  }, [server.id, checkReleases])
 
   useEffect(() => {
     void refresh()
@@ -300,13 +337,11 @@ export function InfraView({
           )}
 
           <Card
-            title="Apps on this box"
-            hint="Pinned tag vs running tag is the line worth reading."
+            title="Apps"
+            hint="Everything this box runs, could run, or has declared elsewhere."
           >
             {here.length === 0 ? (
-              <p className="text-xs text-muted">
-                Nothing assigned to this box yet.
-              </p>
+              <p className="text-xs text-muted">Nothing installed here yet.</p>
             ) : (
               <ul className="flex flex-col gap-2">
                 {here.map((app) => (
@@ -315,19 +350,46 @@ export function InfraView({
                     app={app}
                     run={run}
                     onOpenTerminal={() => onOpenTerminal()}
+                    advanced={advanced}
+                    credentials={credentials}
+                    onCredentialSaved={() => void refreshCredentials()}
+                    release={
+                      app.manifest?.release?.repo
+                        ? releases[app.manifest.release.repo]
+                        : undefined
+                    }
+                    checkingRelease={checkingReleases}
+                    onCheckReleases={() => void checkReleases(status, true)}
+                    // Both derivable, so neither should ever be an empty box you have
+                    // to guess at: the loopback port comes out of the app's compose
+                    // file, and the box label out of infra.server.
+                    defaults={{
+                      upstream: status.catalogue.find((c) => c.name === app.name)?.upstream,
+                      server: status.serverLabel,
+                    }}
                   />
                 ))}
               </ul>
             )}
-            <Catalogue status={status} run={run} disabled={needsPassword} />
-          </Card>
+            <Catalogue
+              status={status}
+              run={run}
+              disabled={needsPassword}
+              credentials={credentials}
+              onCredentialSaved={() => void refreshCredentials()}
+            />
 
-          {elsewhere.length > 0 && (
-            <Card
-              title="Apps on other servers"
-              hint="Each box has its own secrets.yaml, so an app that runs elsewhere usually should not be declared in this one."
-            >
-              <ul className="flex flex-col gap-1.5">
+            {/* Apps assigned to another box, in the same list rather than a card of
+                their own. There used to be three lists here — running here, available
+                to install, running elsewhere — and which one an app was in was the
+                first thing you had to work out. It is one list now, and "elsewhere" is
+                a chip on the row rather than a different place to look. */}
+            {elsewhere.length > 0 && (
+              <ul className="flex flex-col gap-1.5 border-t border-line pt-3">
+                <li className="text-meta text-muted">
+                  Declared here but assigned to another box. Each box has its own
+                  secrets.yaml, so these usually should not be declared in this one.
+                </li>
                 {elsewhere.map((app) => (
                   <li key={app.name} className="flex flex-wrap items-center gap-2">
                     <span className="w-24 shrink-0 truncate text-xs text-ink/70">
@@ -355,12 +417,19 @@ export function InfraView({
                   </li>
                 ))}
               </ul>
-            </Card>
-          )}
+            )}
+          </Card>
 
-          {/* Until the box is actually serving something, these are four empty cards
-              describing a destination. The setup panel above is the route. */}
-          {here.some((a) => a.container !== 'missing') && (
+          {/* Everything below is behind Advanced mode.
+              Not because it is dangerous — Remove is not down here — but because it is
+              the machinery: the Caddy edge, the infra: settings block, the registry,
+              backups and the deploy journal. Install, update, restart and remove are
+              above, and on a working box they are the whole job.
+
+              The second condition is the older one: until the box is actually serving
+              something these are empty cards describing a destination, and the setup
+              panel above is the route. */}
+          {advanced && here.some((a) => a.container !== 'missing') && (
             <>
               <Card
                 title="Edge"
@@ -411,8 +480,8 @@ export function InfraView({
             </>
           )}
 
-          {status.history.length > 0 && (
-            <Card title="Deploy journal" hint="Newest first. Written by rollback.sh and update-amber.sh.">
+          {advanced && status.history.length > 0 && (
+            <Card title="Deploy journal" hint="Newest first. Written by rollback.sh and update-app.sh.">
               <ul className="flex flex-col gap-1 font-mono text-micro">
                 {status.history.map((h, i) => (
                   <li key={`${h.ts}-${i}`} className="flex gap-2 text-muted">

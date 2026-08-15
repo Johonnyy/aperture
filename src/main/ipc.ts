@@ -2,11 +2,13 @@ import { BrowserWindow, ipcMain, nativeTheme } from 'electron'
 import { randomUUID } from 'node:crypto'
 
 import type { AgentConfigInput, BloomLink } from '../shared/bloom'
+import type { ReleaseInfo } from '../shared/version'
 import { IPC } from '../shared/ipc'
 import { paletteFor } from '../shared/theme'
 import type {
   ApertureEvent,
   ConnectionStatus,
+  CredentialSummary,
   KeyRecord,
   ServerConfig,
   Settings,
@@ -28,6 +30,13 @@ import {
   updateSettings,
 } from './config'
 import * as infra from './infra'
+import {
+  deleteCredential,
+  isVaultAvailable as isCredentialVaultAvailable,
+  listCredentials,
+  saveCredential,
+  updateCredential,
+} from './keys/credential-store'
 import { installKey } from './ssh/install'
 import { deleteKey, isVaultAvailable, listKeys } from './ssh/key-store'
 import { titleBarOverlayFor } from './window'
@@ -135,6 +144,38 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
     keys: listKeys(),
     available: isVaultAvailable(),
   }))
+
+  // --- credentials ------------------------------------------------------------
+  //
+  // The same `{ items, available }` envelope the SSH key list uses, for the same
+  // reason: "there are none" and "this machine cannot decrypt any" need different
+  // screens, and a bare array cannot tell them apart.
+  //
+  // Note what is NOT here: no handler returns a credential's value. See IPC.KEYS_*.
+  ipcMain.handle(
+    IPC.KEYS_LIST,
+    (): { credentials: CredentialSummary[]; available: boolean } => ({
+      credentials: listCredentials(),
+      available: isCredentialVaultAvailable(),
+    }),
+  )
+
+  ipcMain.handle(
+    IPC.KEYS_SAVE,
+    (_e, input: { uid?: string; credentialId: string; label: string; value: string }) =>
+      saveCredential(input),
+  )
+
+  ipcMain.handle(
+    IPC.KEYS_UPDATE,
+    (_e, uid: string, patch: { label?: string; credentialId?: string }): void => {
+      updateCredential(uid, patch)
+    },
+  )
+
+  ipcMain.handle(IPC.KEYS_DELETE, (_e, uid: string): void => {
+    deleteCredential(uid)
+  })
 
   ipcMain.handle(IPC.SSH_GENERATE_KEY, (_e, label: string): KeyRecord =>
     generateKey(label || 'aperture'),
@@ -269,6 +310,12 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
         verbose: getSettings().verboseLogging,
       })
     },
+  )
+
+  ipcMain.handle(
+    IPC.INFRA_RELEASES,
+    (_e, repos: string[], force?: boolean): Promise<Record<string, ReleaseInfo>> =>
+      infra.checkReleases(repos ?? [], { force: Boolean(force) }),
   )
 
   ipcMain.handle(IPC.INFRA_CANCEL, (_e, opId: string) => infra.cancelAction(opId))

@@ -134,16 +134,17 @@ export function BloomCard({
             reports what it actually finds, before changing anything.
           </p>
           <div className="flex flex-wrap items-center gap-2">
+            {/* `repairBloom` used to live here: ~100 lines of hand-written repair
+                for this one app's stanza. It is now `declare.sh --reconcile --adopt`,
+                which renames any key carrying the wrong prefix — keeping its value,
+                because a token a peer already holds must survive being renamed — and
+                generates whatever the manifest says the box can. The same command
+                fixes the next app that lands here, which the bespoke one could not. */}
             <SmallButton
               primary
               disabled={needsPassword}
               title={needsPassword ? 'Enter the sudo password above first.' : undefined}
-              onClick={() =>
-                run('repairBloom', "Repair Bloom's configuration", {
-                  app: 'bloom',
-                  domain: app.domain ?? '',
-                })
-              }
+              onClick={() => run('reconcileApp', "Reconcile Bloom's configuration", { app: 'bloom' })}
             >
               Repair configuration
             </SmallButton>
@@ -181,12 +182,53 @@ export function BloomCard({
 
       {/* Step 3: everything is in place and it still has not checked in. Different
           problem, so different words — do not keep blaming the prefix. */}
+      {/* Bloom is healthy and holds a registry token, and the registry still refuses
+          it. The cause is almost always on the registry side and it is not obvious:
+          the sync-store reads SYNC_STORE_KEYS once, at startup, so an app whose token
+          was minted after the store last started is simply unknown to it. Every
+          registration attempt is a 401 that nothing surfaces.
+
+          This used to say "check the sync store itself" and stop there, with the
+          Re-link button sitting underneath it — which reads as the remedy and is not
+          one. Re-link re-reads BLOOM_ADMIN_KEYS so *Aperture* can manage Bloom; it
+          has nothing to do with whether Bloom can reach the registry. */}
       {stillUnregistered && (
-        <p className="rounded-field border border-warn/50 px-3 py-2 text-xs text-warn">
-          Bloom has its keys but has not registered. It registers on startup and on a
-          heartbeat, so give it a moment after a restart — if it persists, check the
-          sync store itself rather than Bloom.
-        </p>
+        <div className="flex flex-col gap-2 rounded-field border border-warn/50 bg-warn/10 p-2.5">
+          <p className="text-xs leading-relaxed text-warn">
+            Bloom has its keys but has not registered. It registers on startup and on a
+            heartbeat, so give it a moment after a restart.
+          </p>
+          <p className="text-micro leading-relaxed text-muted">
+            If it persists, the registry has most likely never been told about Bloom:
+            the sync-store loads its key list at startup, so an app declared after it
+            last started is rejected until it reloads. Re-running the install reloads
+            the key list and restarts the store only if it actually changed.
+            <strong className="text-ink">
+              {' '}
+              Update the amber-infra checkout on this box first
+            </strong>{' '}
+            — an older install.sh minted the token after starting the store and could
+            not fix this.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <SmallButton
+              primary
+              disabled={needsPassword || !app.domain}
+              title={
+                needsPassword
+                  ? 'Enter the sudo password above first.'
+                  : 'Re-runs install.sh for Bloom, which reconciles the registry key list'
+              }
+              onClick={() => run('install', 'Reconcile bloom and the registry', installParams)}
+            >
+              Reload the registry
+            </SmallButton>
+            <span className="text-micro text-muted">
+              Re-link below is a different thing — it refreshes Aperture&apos;s admin
+              key, not Bloom&apos;s registry token.
+            </span>
+          </div>
+        </div>
       )}
 
       {missingModelKey && (

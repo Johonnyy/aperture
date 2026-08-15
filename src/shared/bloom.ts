@@ -249,6 +249,21 @@ export interface ProviderInfo {
    * and the fix is in `secrets.yaml` rather than anywhere in this app.
    */
   configured: boolean
+  /**
+   * The env vars this provider reads its client credentials from, named by the
+   * provider's own TOML in `app/providers/`.
+   *
+   * Reported so that "not configured" can be acted on instead of merely stated.
+   * Adding a provider to Bloom is one file and nothing else anywhere — but the
+   * deployment side used to have to enumerate each provider's credentials by hand in
+   * amber-infra, so every new connection needed a release of that repo too. Knowing
+   * the variable names is what lets the Servers tab offer to fill them for a provider
+   * nothing outside Bloom has heard of.
+   *
+   * Names, never values. They are public — committed in the provider's manifest.
+   */
+  clientIdEnv: string
+  clientSecretEnv: string
   scopesDefault: string[]
   operations: string[]
   docsUrl: string

@@ -43,6 +43,20 @@ export function ServerIcon({ className }: IconProps): React.JSX.Element {
   )
 }
 
+/**
+ * Keys: a key. Not a padlock — a lock says "this is secured", and what this page
+ * actually holds is the things that open other people's locks.
+ */
+export function KeyIcon({ className }: IconProps): React.JSX.Element {
+  return (
+    <svg {...base} className={className}>
+      <circle cx="7" cy="7" r="3.25" />
+      <path d="M9.3 9.3 16 16" />
+      <path d="M13.6 13.6 12 15.2" />
+    </svg>
+  )
+}
+
 /** Settings: sliders. A gear implies machinery; sliders imply preferences. */
 export function SlidersIcon({ className }: IconProps): React.JSX.Element {
   return (

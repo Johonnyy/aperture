@@ -1,9 +1,12 @@
 import type { ApertureEvent, ServerConfig } from '../../shared/types'
 import { cancelStream, execStream } from '../ssh/ssh-client'
-import { ACTIONS, compose, type Params } from './actions'
+import { ACTIONS, compose, type Params, type Secret } from './actions'
+import { readCredential } from '../keys/credential-store'
+import { redactCommand } from './redact'
 import { classify } from './status'
 
 export { readStatus } from './status'
+export { checkReleases } from './release-check'
 export { ACTIONS } from './actions'
 
 export interface RunContext {
@@ -65,15 +68,60 @@ export async function runAction(
   }
   const rehearsing = Boolean(opts.dryRun)
 
+  /**
+   * Decrypt the credentials this action was asked to fill, here and nowhere else.
+   *
+   * The renderer sent uids — it cannot send values, because no IPC channel returns
+   * one. They are read in this process and handed straight to `build`, which puts each
+   * into a quoted heredoc on stdin. They never enter `params`, so they cannot reach
+   * the op log, an audit entry, or a rehearsal echo.
+   *
+   * A credential that cannot be decrypted aborts BEFORE anything runs. Installing with
+   * a key silently missing is how you get an app that starts, serves, and 401s on its
+   * first real request — the same shape of failure as everything else this release is
+   * about.
+   */
+  const secrets: Secret[] = []
+  if (action.resolvesCredentials && params.fills) {
+    let requested: Array<{ key: string; uid: string }> = []
+    try {
+      requested = JSON.parse(params.fills) as Array<{ key: string; uid: string }>
+    } catch {
+      return { ok: false, error: 'the list of credentials to fill was malformed' }
+    }
+    for (const { key, uid } of requested) {
+      const value = readCredential(uid)
+      if (value === null) {
+        const error =
+          `the saved credential for ${key} cannot be read on this machine — ` +
+          're-enter it on the Keys page'
+        log('error', error)
+        ctx.emit({ kind: 'op-done', opId, ok: false })
+        return { ok: false, error }
+      }
+      secrets.push({ key, value })
+    }
+    if (secrets.length > 0) {
+      log('info', `Filling ${secrets.map((s) => s.key).join(', ')} from saved credentials`)
+    }
+  }
+
   // Always `sudo -S -p ''` for an action that needs root, whether or not we have a
   // password. `-S` reads stdin only when sudo actually needs a credential, so this is
   // a no-op under NOPASSWD — and asking first would cost an extra SSH connection to
   // learn something sudo will tell us anyway.
-  const command = compose(action, params, { dryRun: rehearsing, withSudo: action.needsSudo })
+  const command = compose(action, params, {
+    dryRun: rehearsing,
+    withSudo: action.needsSudo,
+    secrets,
+  })
   log('info', rehearsing ? `Rehearsing: ${action.label}` : action.label)
   // The exact command, at `debug`, so verbose logging shows precisely what ran —
-  // and so a flag this GUI composed wrongly is visible rather than inferred.
-  log('debug', command.replace(/^sudo -S -p '' /, 'sudo '))
+  // and so a flag this GUI composed wrongly is visible rather than inferred. Every
+  // heredoc body is replaced by its length first: those bodies are the values the
+  // user typed, `verboseLogging` defaults to on, and this line used to render an API
+  // key into the Status Panel the moment you saved one. See `redact.ts`.
+  log('debug', redactCommand(command).replace(/^sudo -S -p '' /, 'sudo '))
 
   let result: { ok: boolean; code?: number | null; error?: string }
   try {

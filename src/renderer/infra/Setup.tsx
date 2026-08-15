@@ -96,7 +96,7 @@ export function Setup({
                 {status.secrets.placeholders.generatable.length > 0 && (
                   <SmallButton
                     disabled={disabled}
-                    onClick={() => run('generateSecrets', 'Generate the random tokens')}
+                    onClick={() => run('fillSecrets', 'Generate what the box can')}
                   >
                     Generate {status.secrets.placeholders.generatable.length} token
                     {status.secrets.placeholders.generatable.length === 1 ? '' : 's'}

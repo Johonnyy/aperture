@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 
 import { useStore } from '../store'
-import { AmberIcon, BloomIcon, ServerIcon, SlidersIcon } from './icons'
+import { AmberIcon, BloomIcon, KeyIcon, ServerIcon, SlidersIcon } from './icons'
 
-export type View = 'chat' | 'ssh' | 'settings' | 'bloom'
+export type View = 'chat' | 'ssh' | 'keys' | 'settings' | 'bloom'
 
 interface NavItem {
   id: View
@@ -12,11 +12,14 @@ interface NavItem {
 }
 
 /**
- * Apps land here as they're built (finance, school, …), nested under Amber
- * because she's how you reach them — each one is a backend she can query, not a
- * peer of hers.
+ * Apps land here as they're built (finance, school, …).
  *
- * Bloom is the first, and the first row in this column that is *conditional*: it
+ * They were indented under Amber for a while, on the theory that she is how you reach
+ * them. But you also reach them directly — Bloom has a whole tab of its own — and the
+ * indent read as "this row is a detail of the one above" rather than as a relationship,
+ * so it sits flush with everything else now.
+ *
+ * Bloom is the first, and the first row in this column that is *conditional* — it
  * appears only once a link record exists. Note that is "linked", not "reachable" —
  * a stopped Bloom keeps its tab and explains itself inside, because hiding the tab
  * would make an outage look like an uninstall and put the fix somewhere you can no
@@ -26,6 +29,10 @@ const BLOOM: NavItem = { id: 'bloom', label: 'Bloom', icon: BloomIcon }
 
 const AMBER: NavItem = { id: 'chat', label: 'Amber', icon: AmberIcon }
 const SERVERS: NavItem = { id: 'ssh', label: 'Servers', icon: ServerIcon }
+// Beside Servers rather than in the footer with Settings: these are the
+// credentials an install spends, so they belong next to the thing that spends
+// them, not filed under preferences.
+const KEYS: NavItem = { id: 'keys', label: 'Keys', icon: KeyIcon }
 const SETTINGS: NavItem = { id: 'settings', label: 'Settings', icon: SlidersIcon }
 
 const STORAGE_KEY = 'aperture.sidebar.collapsed'
@@ -95,7 +102,6 @@ export function Sidebar({
             item={BLOOM}
             active={view === BLOOM.id}
             collapsed={collapsed}
-            nested
             onClick={() => onNavigate(BLOOM.id)}
           />
         )}
@@ -107,6 +113,13 @@ export function Sidebar({
           active={view === SERVERS.id}
           collapsed={collapsed}
           onClick={() => onNavigate(SERVERS.id)}
+        />
+
+        <NavButton
+          item={KEYS}
+          active={view === KEYS.id}
+          collapsed={collapsed}
+          onClick={() => onNavigate(KEYS.id)}
         />
       </div>
 
@@ -128,13 +141,11 @@ function NavButton({
   item,
   active,
   collapsed,
-  nested,
   onClick,
 }: {
   item: NavItem
   active: boolean
   collapsed: boolean
-  nested?: boolean
   onClick: () => void
 }): React.JSX.Element {
   const Icon = item.icon
@@ -153,7 +164,6 @@ function NavButton({
         active
           ? 'bg-accent/15 text-accent-hi'
           : 'text-muted hover:bg-ink/5 hover:text-ink active:bg-ink/10',
-        nested && !collapsed ? 'ml-3' : '',
       ].join(' ')}
     >
       <Icon className="shrink-0" />

@@ -26,15 +26,35 @@ export const SECRETS = `${INFRA_ETC}/secrets.yaml`
 
 export type Params = Record<string, string>
 
+/**
+ * A credential resolved from the vault, on its way into a heredoc.
+ *
+ * Kept out of `Params` deliberately. `Params` is the bag that gets logged, echoed in
+ * rehearsals and passed around by the renderer; giving secrets their own parameter
+ * means the type system, rather than a convention, is what stops one ending up there.
+ */
+export interface Secret {
+  key: string
+  value: string
+}
+
 export interface ActionDef {
   label: string
   /** Prefixed with `sudo -S -p ''` and given the password on stdin. */
   needsSudo: boolean
   /** Present when there is a form of this action that changes nothing. */
-  rehearse?: (p: Params) => string
-  build: (p: Params) => string
+  rehearse?: (p: Params, secrets?: Secret[]) => string
+  build: (p: Params, secrets?: Secret[]) => string
   /** Overrides the default 30-minute ceiling. `install.sh` runs apt and waits on ACME. */
   timeoutMs?: number
+  /**
+   * Resolve `p.fills` through the credential vault before composing.
+   *
+   * `p.fills` is JSON: `[{ key, uid }]`. The renderer sends *uids* and never values —
+   * there is no IPC channel that would give it one. `runAction` decrypts them in main
+   * and hands them here as `secrets`, and they go straight into a quoted heredoc.
+   */
+  resolvesCredentials?: boolean
 }
 
 /** Single-quote for `sh`. Every interpolated value goes through this. */
@@ -190,128 +210,15 @@ const DIRTY_CHECK = [
 const ADMIN_TOKEN = `$(yq -r '.sync_store.keys[] | select(.name == "amber") | .token' ${q(SECRETS)} | head -n1)`
 const SYNC_BASE = `$(yq -r '.sync_store.url' ${q(SECRETS)})`
 
-/**
- * The env prefix an app's discovery keys are written under.
- *
- * `AGENT_MCP` is right for a plain agent-mcp-py consumer, which is most of them.
- * Normalised because a trailing underscore is the obvious thing to type and would
- * otherwise produce `BLOOM_MCP__KEYS`.
+/*
+ * `envPrefix()` used to live here: `(p.envPrefix || 'AGENT_MCP')`, fed by a free-text
+ * field in the catalogue and a hardcoded {amber, bloom} lookup beside it. It is gone,
+ * along with `addApp` and `repairBloom`, because the prefix is now read from the app's
+ * own `manifest.yaml` on the box — where CI has already checked that it agrees with
+ * the names of the keys it governs. Aperture no longer knows how a stanza is spelled,
+ * which is why it can no longer spell one wrongly.
  */
-function envPrefix(p: Params): string {
-  const raw = (p.envPrefix || 'AGENT_MCP').trim().toUpperCase()
-  return raw.replace(/_+$/, '') || 'AGENT_MCP'
-}
 
-/**
- * The Bloom repair, as one script, in rehearsal or for real.
- *
- * Written once and branched on `dry` so the rehearsal cannot drift from the thing it
- * rehearses — the failure mode where a dry run reports a step the real run does not
- * take is worse than having no rehearsal at all.
- *
- * A Fernet key is 32 random bytes in urlsafe base64. `openssl rand -base64 32` with
- * `+/` translated to `-_` is exactly that, which means no Python is needed on the
- * box — `openssl` is already a hard dependency of install.sh.
- */
-function BLOOM_REPAIR(p: Params, dry: boolean): string {
-  const app = p.app || 'bloom'
-  const prefix = 'BLOOM_MCP'
-  const domain = p.domain || ''
-  const A = q(app)
-  const say = (msg: string): string => `echo " ok  ${dry ? 'would ' : ''}${msg}"`
-  // In a rehearsal every mutation becomes a report, so the two paths stay in step.
-  const write = (cmd: string, msg: string): string => (dry ? say(msg) : `${cmd} && ${say(msg)}`)
-
-  return [
-    'set -e',
-    `command -v yq >/dev/null || { echo "error: yq is not installed on this box."; exit 127; }`,
-    `yq -e ${q(`.apps."${app}"`)} ${q(SECRETS)} >/dev/null 2>&1 || { echo "error: ${app} is not declared in secrets.yaml."; exit 1; }`,
-    dry ? '' : `cp -a ${q(SECRETS)} ${q(`${SECRETS}.bak`)}`,
-
-    // 0. Report what is actually on the box, before touching it.
-    //
-    // `env_prefix` is not in the status document, so this is the only place the
-    // cause can be *seen* rather than inferred. Reading the rendered env file is the
-    // clincher: install.sh writes the three discovery keys there under whatever
-    // prefix it resolved, so whichever `*_PUBLIC_URL` appears names the bug.
-    `echo "==> what this box has now"`,
-    `echo "     env_prefix: $(yq -r ${q(`.apps."${app}".env_prefix // "(not set — defaults to AGENT_MCP)"`)} ${q(SECRETS)})"`,
-    `ENVF=${q(`${INFRA_ETC}/${app}/${app}.env`)}`,
-    `if [ -r "$ENVF" ]; then`,
-    `  FOUND="$(grep -oE '^[A-Z_]+_PUBLIC_URL' "$ENVF" | head -n1)"`,
-    `  echo "     rendered env has: \${FOUND:-no *_PUBLIC_URL at all}"`,
-    `  case "$FOUND" in`,
-    `    BLOOM_MCP_PUBLIC_URL) echo "     that is the one Bloom reads." ;;`,
-    `    "") echo " !  no discovery keys were written, so it cannot register." ;;`,
-    `    *) echo " !  Bloom reads BLOOM_MCP_PUBLIC_URL, so that one is ignored. This is the bug." ;;`,
-    `  esac`,
-    `else`,
-    `  echo "     (its env file is not readable from here)"`,
-    `fi`,
-
-    // 1. The prefix itself — the root cause.
-    `CUR="$(yq -r ${q(`.apps."${app}".env_prefix // ""`)} ${q(SECRETS)})"`,
-    `if [ "$CUR" != "${prefix}" ]; then`,
-    `  ${write(`A=${A} V=${q(prefix)} yq -i '.apps[strenv(A)].env_prefix = strenv(V)' ${q(SECRETS)}`, `set env_prefix to ${prefix} (currently: $CUR)`)}`,
-    `else echo " ok  env_prefix is already ${prefix}"; fi`,
-
-    // 2. Move the bearer token to the name Bloom actually reads, keeping its value
-    //    so anything already holding it stays valid.
-    `OLD="$(yq -r ${q(`.apps."${app}".env.AGENT_MCP_KEYS // ""`)} ${q(SECRETS)})"`,
-    `NEW="$(yq -r ${q(`.apps."${app}".env.BLOOM_MCP_KEYS // ""`)} ${q(SECRETS)})"`,
-    `if [ -z "$NEW" ] && [ -n "$OLD" ]; then`,
-    `  ${write(`A=${A} V="$OLD" yq -i '.apps[strenv(A)].env.BLOOM_MCP_KEYS = strenv(V)' ${q(SECRETS)}`, 'move AGENT_MCP_KEYS to BLOOM_MCP_KEYS, keeping its token')}`,
-    `elif [ -z "$NEW" ]; then`,
-    `  ${write(`A=${A} V="amber:$(openssl rand -hex 32)" yq -i '.apps[strenv(A)].env.BLOOM_MCP_KEYS = strenv(V)' ${q(SECRETS)}`, 'generate BLOOM_MCP_KEYS')}`,
-    `else echo " ok  BLOOM_MCP_KEYS is already set"; fi`,
-    `if [ -n "$OLD" ]; then`,
-    `  ${write(`A=${A} yq -i 'del(.apps[strenv(A)].env.AGENT_MCP_KEYS)' ${q(SECRETS)}`, 'remove the stale AGENT_MCP_KEYS, which Bloom ignores')}`,
-    `fi`,
-
-    // 3. Aperture's own key. Separate from the peer key on purpose: a GUI that can
-    //    edit configuration must not hold one that also authorises spending.
-    `if [ -z "$(yq -r ${q(`.apps."${app}".env.BLOOM_ADMIN_KEYS // ""`)} ${q(SECRETS)})" ]; then`,
-    `  ${write(`A=${A} V="Aperture:$(openssl rand -hex 32)" yq -i '.apps[strenv(A)].env.BLOOM_ADMIN_KEYS = strenv(V)' ${q(SECRETS)}`, 'generate BLOOM_ADMIN_KEYS, which is what the Bloom tab authenticates with')}`,
-    `else echo " ok  BLOOM_ADMIN_KEYS is already set"; fi`,
-
-    // 4. The database path inside the container's volume.
-    `if [ -z "$(yq -r ${q(`.apps."${app}".env.BLOOM_DB_PATH // ""`)} ${q(SECRETS)})" ]; then`,
-    `  ${write(`A=${A} V=${q('/data/bloom.db')} yq -i '.apps[strenv(A)].env.BLOOM_DB_PATH = strenv(V)' ${q(SECRETS)}`, 'set BLOOM_DB_PATH to /data/bloom.db')}`,
-    `else echo " ok  BLOOM_DB_PATH is already set"; fi`,
-
-    // 5. Token encryption. Urlsafe base64 of 32 bytes IS a Fernet key — Bloom
-    //    rejects a hex string at startup rather than storing a token it could not
-    //    protect, so `openssl rand -hex 32` would be silently wrong here.
-    `if [ -z "$(yq -r ${q(`.apps."${app}".env.BLOOM_FERNET_KEYS // ""`)} ${q(SECRETS)})" ]; then`,
-    `  ${write(`A=${A} V="$(openssl rand -base64 32 | tr '+/' '-_')" yq -i '.apps[strenv(A)].env.BLOOM_FERNET_KEYS = strenv(V)' ${q(SECRETS)}`, 'generate BLOOM_FERNET_KEYS for encrypting connected-account tokens')}`,
-    `else echo " ok  BLOOM_FERNET_KEYS is already set"; fi`,
-
-    // 6. Amber's side. She resolves peers ONLY from the static map — she never reads
-    //    the sync store's discovered layer — so without this Bloom can register
-    //    perfectly and still be uncallable, with no error anywhere.
-    domain
-      ? [
-          `TOK="$(yq -r ${q(`.apps."${app}".env.BLOOM_MCP_KEYS // ""`)} ${q(SECRETS)} | sed 's/^[^:]*://')"`,
-          `if yq -e '.apps.amber' ${q(SECRETS)} >/dev/null 2>&1; then`,
-          `  ${write(`V=${q(`${app}=https://${domain}`)} yq -i '.apps.amber.env.AMBER_MCP_PEERS = strenv(V)' ${q(SECRETS)}`, `point Amber at https://${domain}`)}`,
-          `  ${write(`V="$TOK" yq -i '.apps.amber.env.AMBER_MCP_PEER_TOKEN = strenv(V)' ${q(SECRETS)}`, 'give Amber the token Bloom expects')}`,
-          `  echo " !  Amber reads that on start, so re-run her install too."`,
-          `fi`,
-        ].join('\n')
-      : `echo " !  no domain given, so Amber's peer wiring was left alone."`,
-
-    dry ? '' : `chmod 600 ${q(SECRETS)}`,
-
-    // 7. What a human still has to supply. Never invented: a placeholder in a
-    //    credential field reads as done, and this one comes from a provider.
-    `if [ -z "$(yq -r ${q(`.apps."${app}".env.BLOOM_OPENROUTER_API_KEY // ""`)} ${q(SECRETS)})" ]; then`,
-    `  echo " !  BLOOM_OPENROUTER_API_KEY is still unset. Add it below — no agent can run without it."`,
-    `fi`,
-    `echo " !  Re-run the install for ${app} so the new keys reach its .env file."`,
-  ]
-    .filter(Boolean)
-    .join('\n')
-}
 
 export const ACTIONS: Record<string, ActionDef> = {
   // --- getting amber-infra onto the box ------------------------------------
@@ -453,72 +360,6 @@ export const ACTIONS: Record<string, ActionDef> = {
       ].join('\n'),
   },
 
-  /**
-   * Fill in every value that can only be a random secret.
-   *
-   * Two passes, because the placeholders come in two shapes:
-   *
-   * 1. **`CHANGEME-openssl-rand-hex-32`** — a placeholder whose own text is the
-   *    recipe. Nothing for a human to decide, only a chore to do nine times without
-   *    pasting the same token into two slots by mistake.
-   * 2. **A bare `CHANGEME` inside a `*_KEYS` value** — `AMBER_MCP_KEYS:
-   *    "spawner:CHANGEME,Aperture:CHANGEME"`. These are bearer tokens other agents
-   *    present to this app's MCP server; `agent_mcp.parse_keys` accepts any string
-   *    after the colon, so they are as generatable as the first kind. They are not
-   *    marked as such in the example only because the value is a compound string and
-   *    a whole-value replace would destroy the `name:` labels.
-   *
-   * The second pass is a correctness fix, not a convenience. `secrets_render_env`
-   * does not check for placeholders, so a `CHANGEME` here is rendered verbatim into
-   * the app's `.env` and mounted as a live credential — a public HTTPS MCP endpoint
-   * whose bearer token is the word CHANGEME.
-   *
-   * Replaced one occurrence at a time so every slot gets a *distinct* token, which is
-   * the part that is easy to get wrong by hand. Anything left is an API key nobody
-   * here can invent; those are listed, not touched.
-   */
-  generateSecrets: {
-    label: 'Generate the random tokens',
-    needsSudo: true,
-    rehearse: () =>
-      [
-        'echo "==> would generate a distinct 32-byte token for each of these"',
-        `grep -nE 'CHANGEME-openssl-rand-hex|^[[:space:]]*[A-Z_]+_KEYS:.*CHANGEME' ${q(SECRETS)} \\`,
-        `  | sed 's/^/ !  /' || echo " ok  none left to generate"`,
-        'echo "==> these need a value only you have, and would be left alone"',
-        `grep -n CHANGEME ${q(SECRETS)} \\`,
-        `  | grep -vE 'openssl-rand-hex|^[0-9]+:[[:space:]]*[A-Z_]+_KEYS:' \\`,
-        `  | sed 's/^/ !  /' || echo " ok  none"`,
-      ].join('\n'),
-    build: () =>
-      [
-        'set -e',
-        `[ -f ${q(SECRETS)} ] || { echo "error: no ${SECRETS} yet — create it first."; exit 1; }`,
-        `cp -a ${q(SECRETS)} ${q(`${SECRETS}.bak`)}`,
-        'N=0',
-        // `0,/re/s//x/` replaces only the first match, so each turn of the loop mints
-        // a new token rather than one token landing in every slot.
-        `while grep -q 'CHANGEME-openssl-rand-hex-32' ${q(SECRETS)}; do`,
-        '  V="$(openssl rand -hex 32)"',
-        `  sed -i "0,/CHANGEME-openssl-rand-hex-32/s//$V/" ${q(SECRETS)}`,
-        '  N=$((N + 1))',
-        'done',
-        // Anchored to the key name so it can only ever touch a `*_KEYS` line — an API
-        // key on any other line keeps its CHANGEME and stays visibly unset.
-        `while grep -qE '^[[:space:]]*[A-Z_]+_KEYS:.*CHANGEME' ${q(SECRETS)}; do`,
-        '  V="$(openssl rand -hex 32)"',
-        `  sed -i "0,/^\\([[:space:]]*[A-Z_]\\+_KEYS:.*\\)CHANGEME/s//\\1$V/" ${q(SECRETS)}`,
-        '  N=$((N + 1))',
-        'done',
-        `chmod 600 ${q(SECRETS)}`,
-        'echo " ok  generated $N token(s); previous file kept as secrets.yaml.bak"',
-        `if grep -q CHANGEME ${q(SECRETS)}; then`,
-        '  echo " !  still needs a value only you have:";',
-        `  grep -n CHANGEME ${q(SECRETS)} | sed 's/^/ !  /';`,
-        `else echo " ok  no placeholders left"; fi`,
-        `echo " !  a generated *_MCP_KEYS token is only the ACCEPTING half. Whatever presents it — a peer agent via the sync-store, or Aperture — still needs the same value."`,
-      ].join('\n'),
-  },
 
   /**
    * Write one value into `secrets.yaml`.
@@ -599,59 +440,6 @@ export const ACTIONS: Record<string, ActionDef> = {
    * present to this app, and nothing outside the box constrains it. The three
    * discovery keys are deliberately left out — `install.sh` computes them.
    */
-  /**
-   * Declare an app in secrets.yaml.
-   *
-   * **`env_prefix` is not cosmetic and its absence fails silently**, which is why it
-   * is a parameter rather than a constant. Most apps embed only `agent-mcp-py` and
-   * read `AGENT_MCP_*`, so the default is right. An app that embeds `agent-runtime`
-   * as well owns a single prefix of its own and builds both libraries' settings from
-   * it — Amber (`AMBER_MCP`) and Bloom (`BLOOM_MCP`) both do.
-   *
-   * Get it wrong and nothing errors. Those apps' settings classes use
-   * `extra="ignore"`, so keys under the wrong prefix are not a validation failure —
-   * they are simply not read. The app starts, serves, has no bearer keys so its MCP
-   * server is never mounted, has no public URL so it never registers, and the only
-   * symptom is the word "unregistered" in a status report.
-   *
-   * This action used to hardcode `AGENT_MCP_KEYS`, and that is exactly how it went
-   * wrong for Bloom the first time.
-   */
-  addApp: {
-    label: 'Declare a new app',
-    needsSudo: true,
-    rehearse: (p) =>
-      [
-        `if yq -e ${q(`.apps.${JSON.stringify(p.app)}`)} ${q(SECRETS)} >/dev/null 2>&1; then`,
-        `  echo "error: ${p.app} is already declared in secrets.yaml."; exit 1;`,
-        `fi`,
-        `echo " ok  would add apps.${p.app} (domain ${p.domain}, upstream ${p.upstream || '127.0.0.1:8090'}, image ${p.image || '(unset)'})"`,
-        `echo " ok  would set env_prefix to ${envPrefix(p)}"`,
-        `echo " ok  would generate one ${envPrefix(p)}_KEYS token for it"`,
-        `if [ -f ${q(`${INFRA_ROOT}/${p.app}/docker-compose.prod.yml`)} ]; then`,
-        `  echo " ok  ${INFRA_ROOT}/${p.app}/docker-compose.prod.yml exists in the checkout";`,
-        `else`,
-        `  echo " !  there is no ${INFRA_ROOT}/${p.app}/ in the amber-infra checkout. install.sh needs ${p.app}/docker-compose.prod.yml — commit one to the repo (model it on sync-store/docker-compose.prod.yml) before installing.";`,
-        `fi`,
-      ].join('\n'),
-    build: (p) =>
-      [
-        'set -e',
-        `cp -a ${q(SECRETS)} ${q(`${SECRETS}.bak`)}`,
-        'TOK="$(openssl rand -hex 32)"',
-        `A=${q(p.app)} D=${q(p.domain)} U=${q(p.upstream || '127.0.0.1:8090')} I=${q(p.image)} S=${q(p.server || 'b')} P=${q(envPrefix(p))} \\`,
-        `  yq -i '.apps[strenv(A)] = {` +
-          `"domain": strenv(D), "upstream": strenv(U), "image": strenv(I), ` +
-          `"managed_by": "docker", "server": strenv(S), "env_prefix": strenv(P), "env": {}}' ${q(SECRETS)}`,
-        // The key's own name follows the prefix. A BLOOM_MCP app needs
-        // BLOOM_MCP_KEYS; giving it AGENT_MCP_KEYS leaves it with no keys at all.
-        `A=${q(p.app)} K=${q(`${envPrefix(p)}_KEYS`)} V="amber:$TOK" \\`,
-        `  yq -i '.apps[strenv(A)].env[strenv(K)] = strenv(V)' ${q(SECRETS)}`,
-        `chmod 600 ${q(SECRETS)}`,
-        `echo " ok  declared apps.${p.app} with env_prefix ${envPrefix(p)} and a generated ${envPrefix(p)}_KEYS token"`,
-        `echo " !  install.sh also needs ${INFRA_ROOT}/${p.app}/docker-compose.prod.yml committed to amber-infra. Until that exists, installing ${p.app} will stop with 'no compose file'."`,
-      ].join('\n'),
-  },
 
   /**
    * Rename an app that has not been deployed yet.
@@ -760,11 +548,131 @@ export const ACTIONS: Record<string, ActionDef> = {
    * `BLOOM_OPENROUTER_API_KEY` is deliberately not invented — it comes from a
    * provider, and a placeholder would read as done. It is reported instead.
    */
-  repairBloom: {
-    label: "Repair Bloom's configuration",
+  // --- the composed operations ------------------------------------------------
+  //
+  // One button each, because the sequence is not a decision anyone should have to
+  // make. Getting an app running used to be Declare, then Install, then Reconcile,
+  // then Repair, then Link, in that order, and knowing the order was the job.
+
+  declareApp: {
+    label: 'Declare an app',
     needsSudo: true,
-    rehearse: (p) => BLOOM_REPAIR(p, true),
-    build: (p) => BLOOM_REPAIR(p, false),
+    rehearse: (p) => `bash ${script('install/declare.sh')} ${declareFlags(p)} --dry-run`,
+    build: (p) => `bash ${script('install/declare.sh')} ${declareFlags(p)}`,
+  },
+
+  /**
+   * What `repairBloom` was, generalised.
+   *
+   * That action was ~100 lines of hand-written repair for one app whose stanza had
+   * been declared with `AGENT_MCP_KEYS` when it reads `BLOOM_MCP_KEYS`. `--adopt`
+   * renames any key whose suffix matches a declared one, keeping its value — the
+   * token may already be held by a peer, so regenerating it would break a working
+   * pairing to fix a naming mistake.
+   */
+  reconcileApp: {
+    label: 'Reconcile configuration',
+    needsSudo: true,
+    rehearse: (p) =>
+      `bash ${script('install/declare.sh')} --app ${q(p.app)} --reconcile --adopt --dry-run`,
+    build: (p) => `bash ${script('install/declare.sh')} --app ${q(p.app)} --reconcile --adopt`,
+  },
+
+  /**
+   * Write saved credentials into an app's stanza, without installing anything.
+   *
+   * The path for a key whose *existence* was not known when the app was declared — a
+   * provider added to Bloom after the fact. `installApp` fills the manifest's named
+   * keys; this fills whichever ones the caller resolved from a live discovery, and is
+   * otherwise the same mechanism: uids in, heredocs out, no value in `argv`.
+   */
+  fillCredentials: {
+    label: 'Set credentials',
+    needsSudo: true,
+    resolvesCredentials: true,
+    rehearse: (p, secrets) =>
+      [
+        `echo "==> would set ${(secrets ?? []).map((s) => s.key).join(', ')} for ${p.app}"`,
+        // Shape, never content — the same rule setVar's rehearsal follows.
+        ...(secrets ?? []).map(
+          (s) => `echo " !  ${s.key}: ${s.value.length} characters"`,
+        ),
+      ].join('\n'),
+    build: (p, secrets) =>
+      [
+        'set -e',
+        ...(secrets ?? []).flatMap((s) => [
+          heredoc('APERTURE_VALUE', s.value),
+          `V="$APERTURE_VALUE" yq -i ${q(`.apps."${p.app}".env."${s.key}" = strenv(V)`)} ${q(SECRETS)}`,
+          `echo " ok  ${s.key} set"`,
+        ]),
+        `chmod 600 ${q(SECRETS)}`,
+        `echo " !  reconcile or restart ${p.app} to hand these to the running container"`,
+      ].join('\n'),
+  },
+
+  fillSecrets: {
+    label: 'Generate what the box can',
+    needsSudo: true,
+    rehearse: (p) =>
+      `bash ${script('install/fill-secrets.sh')} ${opt('--app', p.app)} --dry-run`,
+    build: (p) => `bash ${script('install/fill-secrets.sh')} ${opt('--app', p.app)}`,
+  },
+
+  /**
+   * Declare, generate, fill from the vault, install — as one rehearsable operation.
+   *
+   * The rehearsal runs against a **scratch copy** of secrets.yaml rather than
+   * describing what it would do. `install.sh --dry-run` cannot rehearse against a
+   * stanza that a rehearsed `declare.sh` never wrote, so without the copy the plan
+   * would be a guess about the very step most likely to be wrong. Every script here
+   * honours `--secrets FILE`, which is what makes this possible at all.
+   *
+   * So declare and fill genuinely execute, `install.sh --dry-run` sees exactly the
+   * stanza the real run will see — including its preflight, DNS and image-pull checks
+   * and `manifest_check` — and nothing on the real box changes.
+   */
+  installApp: {
+    label: 'Install',
+    needsSudo: true,
+    resolvesCredentials: true,
+    rehearse: (p, secrets) => INSTALL_SEQUENCE(p, secrets ?? [], true),
+    build: (p, secrets) => INSTALL_SEQUENCE(p, secrets ?? [], false),
+    timeoutMs: 15 * 60_000,
+  },
+
+  /**
+   * Uninstall and undeclare, in that order.
+   *
+   * The order is load-bearing: `remove_app` reads `.backup.target` and the sync-store
+   * admin token out of secrets.yaml, so the stanza has to outlive the teardown that
+   * uses it. Doing it the other way leaves a container nothing describes.
+   *
+   * Volumes are kept unless `purge` is set. That default is deliberate in
+   * `uninstall.sh` and a GUI must not quietly invert it.
+   */
+  removeApp: {
+    label: 'Remove',
+    needsSudo: true,
+    rehearse: (p) => `bash ${script('install/uninstall.sh')} ${removeFlags(p)} --dry-run`,
+    build: (p) => `bash ${script('install/uninstall.sh')} ${removeFlags(p)}`,
+    timeoutMs: 10 * 60_000,
+  },
+
+  /**
+   * Update to a published version, and put it back if it does not come up.
+   *
+   * `update-app.sh` rather than `setImage` + `install`: the revert-to-last-known-good
+   * is the reason a one-click update is safe on a box you are not sitting at, and a
+   * pin-then-reconcile loses exactly that.
+   */
+  updateApp: {
+    label: 'Update',
+    needsSudo: true,
+    rehearse: (p) =>
+      `bash ${script('deploy/update-app.sh')} ${q(p.app)} ${opt('--to', p.tag)} --dry-run`,
+    build: (p) => `bash ${script('deploy/update-app.sh')} ${q(p.app)} ${opt('--to', p.tag)}`,
+    timeoutMs: 10 * 60_000,
   },
 
   install: {
@@ -909,6 +817,95 @@ function installFlags(p: Params): string {
   )
 }
 
+function declareFlags(p: Params): string {
+  return (
+    `--app ${q(p.app)}` +
+    opt('--domain', p.domain) +
+    opt('--upstream', p.upstream) +
+    opt('--image', p.image) +
+    opt('--server', p.server) +
+    (p.reconcile ? ' --reconcile' : '')
+  )
+}
+
+function removeFlags(p: Params): string {
+  return (
+    `--app ${q(p.app)}` +
+    // Both are opt-in. `--purge` deletes the app's data volumes and `--undeclare`
+    // removes its stanza; the composed Remove sets the second and offers the first
+    // as an unchecked box, which is the same default uninstall.sh has on its own.
+    (p.purge === 'true' ? ' --purge' : '') +
+    (p.undeclare === 'false' ? '' : ' --undeclare')
+  )
+}
+
+/**
+ * The whole install, as one script.
+ *
+ * Under rehearsal every step runs for real against a scratch copy of secrets.yaml,
+ * and only `install.sh` is given `--dry-run`. See the `installApp` docblock.
+ */
+function INSTALL_SEQUENCE(p: Params, secrets: Secret[], rehearsal: boolean): string {
+  const target = rehearsal ? `${INFRA_ETC}/.rehearse-${p.app}.yaml` : SECRETS
+  const sf = `--secrets ${q(target)}`
+  const lines: string[] = ['set -e']
+
+  if (rehearsal) {
+    lines.push(
+      `R=${q(target)}`,
+      // A cancelled SSH stream can skip this. The name is fixed per app and the file
+      // is created root-only, so the next run overwrites it and it is never readable
+      // by anyone who could not already read secrets.yaml.
+      `trap 'rm -f "$R"' EXIT`,
+      `install -m 600 -o root -g root /dev/null "$R"`,
+      `cat ${q(SECRETS)} > "$R"`,
+      `echo "==> rehearsing against a scratch copy of secrets.yaml — the real one is untouched"`,
+    )
+  }
+
+  lines.push(
+    `bash ${script('install/declare.sh')} ${sf} --app ${q(p.app)}` +
+      opt('--domain', p.domain) +
+      opt('--server', p.server) +
+      ' --reconcile',
+    `bash ${script('install/fill-secrets.sh')} ${sf} --app ${q(p.app)}`,
+  )
+
+  // Plain settings the checklist collected — a database path, a feature flag. After
+  // declare, so an explicit override beats the manifest default it just seeded; before
+  // install, so the container comes up with it. Not secrets, so no heredoc: seeing
+  // these in the operation log is the point.
+  let configs: Record<string, string> = {}
+  try {
+    configs = p.configs ? (JSON.parse(p.configs) as Record<string, string>) : {}
+  } catch {
+    configs = {}
+  }
+  for (const [key, value] of Object.entries(configs)) {
+    if (!value) continue
+    lines.push(
+      `V=${q(value)} yq -i ${q(`.apps."${p.app}".env."${key}" = strenv(V)`)} ${q(target)}`,
+      `echo " ok  ${key} = ${value}"`,
+    )
+  }
+
+  // Vault values, one quoted heredoc each: never in `argv`, so `ps` on the far end
+  // shows the `read` and nothing else. `strenv` keeps a value containing `:` or `#`
+  // from rewriting the YAML structure around it.
+  for (const s of secrets) {
+    lines.push(
+      heredoc('APERTURE_VALUE', s.value),
+      `V="$APERTURE_VALUE" yq -i ${q(`.apps."${p.app}".env."${s.key}" = strenv(V)`)} ${q(target)}`,
+      `echo " ok  ${s.key} filled from the saved credential"`,
+    )
+  }
+
+  lines.push(
+    `bash ${script('install/install.sh')} ${sf} ${installFlags(p)}${rehearsal ? ' --dry-run' : ''}`,
+  )
+  return lines.join('\n')
+}
+
 /**
  * The command to actually send, wrapped for privilege.
  *
@@ -919,9 +916,11 @@ function installFlags(p: Params): string {
 export function compose(
   action: ActionDef,
   params: Params,
-  opts: { dryRun?: boolean; withSudo?: boolean },
+  opts: { dryRun?: boolean; withSudo?: boolean; secrets?: Secret[] },
 ): string {
-  const body = opts.dryRun && action.rehearse ? action.rehearse(params) : action.build(params)
+  const secrets = opts.secrets ?? []
+  const body =
+    opts.dryRun && action.rehearse ? action.rehearse(params, secrets) : action.build(params, secrets)
   const inner = `bash -lc ${q(body)}`
   return action.needsSudo && opts.withSudo ? `sudo -S -p '' ${inner}` : inner
 }
