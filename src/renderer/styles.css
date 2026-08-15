@@ -257,3 +257,29 @@ body::after {
 .animate-pulse-dot {
   animation: pulse-dot 1.2s ease-in-out infinite;
 }
+
+/* The registry map's live edge, marching toward the trunk.
+ *
+ * Applied ONLY to the hovered or focused node's edge, never to all of them: fifteen
+ * permanently marching paths is a battery cost that carries no information, and
+ * "everything is moving" is indistinguishable from "nothing is". A fixed 1.2s matches
+ * pulse-dot rather than reading --motion-duration, because Terminal green's 60ms would
+ * make an 8x march frantic instead of characterful — this is ambience, not a state
+ * change, and state changes here do inherit the theme's pace through `transition`. */
+@keyframes registry-flow {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+.animate-registry-flow {
+  animation: registry-flow 1.2s linear infinite;
+}
+
+/* Both of the above are decoration. Neither carries meaning that the dash pattern,
+ * the glyph and the text do not already carry, so both can simply stop. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse-dot,
+  .animate-registry-flow {
+    animation: none;
+  }
+}

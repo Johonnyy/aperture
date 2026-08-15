@@ -291,6 +291,18 @@ export const EXPECTED_SCHEMA = 8
 export const MANIFEST_SCHEMA = 9
 
 /**
+ * The document version that reports the registry's key list — feature-detected, never
+ * gated, for exactly the reason above.
+ *
+ * Schema 10 adds `syncStore.keys` (what secrets.yaml declares and what the running
+ * container was actually *started* with, both as fingerprints), `syncStore.startedAt`
+ * and per-app `startedAt` / `syncTokenFingerprint`. Those are what let the registry
+ * map name a single cause instead of listing four. Without them it still draws — every
+ * app reads `unclear`, and the offered fix is the one that is safe either way.
+ */
+export const REGISTRY_SCHEMA = 10
+
+/**
  * What a box still carries from before it was containerised.
  *
  * This repo assumes it owns 80, 443 and each app's loopback port; a Caddy or an Amber
@@ -418,6 +430,52 @@ export interface InfraApp {
    * serves, and never registers, with nothing anywhere saying so.
    */
   envPrefixRendered?: string | null
+  /**
+   * When the container last started, ISO-8601. Present from schema 10.
+   *
+   * Registration happens on startup and then only every 300 seconds, so "not
+   * registered" twenty seconds after a restart and "not registered" an hour after one
+   * are different findings with different answers. This is the only field that tells
+   * them apart, and without it the honest thing to say was "give it a moment" — which
+   * is what the old Bloom card said, forever, including when waiting was hopeless.
+   */
+  startedAt?: string | null
+  /**
+   * Fingerprint of the `*_SYNC_STORE_TOKEN` in this app's *rendered* env file.
+   *
+   * Compared against the `sync_store.keys` entry of the same name it separates two
+   * failures that present identically: the registry never heard of this key, and the
+   * app is still presenting an older one. The first is fixed at the registry, the
+   * second at the app.
+   */
+  syncTokenFingerprint?: string | null
+  /**
+   * The app's own last words about registering. Present from schema 10.
+   *
+   * `agent_mcp`'s `register()` logs and swallows every failure by contract, so the
+   * reason an app never registered reaches no other surface — not the store, not this
+   * document, not the GUI. It exists only in the container's log. Reading it here is
+   * what turns "it never checked in" from a dead end into a sentence naming the repair,
+   * because the app already said what went wrong and nobody was listening.
+   *
+   * Bounded and redacted on the box: last 4 matching lines, 300 chars each, any
+   * token-shaped run replaced.
+   */
+  registrationLog?: string[]
+}
+
+/**
+ * One bearer key the registry knows about, as a name and a fingerprint.
+ *
+ * Never a token. `fp` is the first 8 hex of its sha256 — the same label
+ * `sync-store/app/auth.py` stamps on a caller presenting a bare token, chosen so a
+ * fingerprint here and one in the store's own log are the same string.
+ */
+export interface SyncStoreKey {
+  name: string
+  fp: string
+  /** The value is still a CHANGEME placeholder, so it was never really set. */
+  placeholder: boolean
 }
 
 /**
@@ -554,6 +612,26 @@ export interface InfraStatus {
     containerState: string
     /** Why it is not answering, when it is not. Four causes, four different fixes. */
     detail: string | null
+    /** When the store's container last started, ISO-8601. Present from schema 10. */
+    startedAt?: string | null
+    /**
+     * The key list from both sides. Present from schema 10.
+     *
+     * The store reads `SYNC_STORE_KEYS` **once, at container start**, so "the token in
+     * secrets.yaml" and "the token the store is checking against" are two different
+     * facts, and every unexplained 401 in this ecosystem is the gap between them.
+     * `declared` is the first, `running` the second.
+     *
+     * `readable` is true only when *both* sides were actually read. An empty list from
+     * an unreadable secrets file and an empty list from a store with no keys are the
+     * same JSON and emphatically not the same finding — without this flag the second
+     * reading would paint every app as broken and point at the wrong repair.
+     */
+    keys?: {
+      readable: boolean
+      running: SyncStoreKey[]
+      declared: SyncStoreKey[]
+    }
   }
   history: DeployRecord[]
   backups: { target: string | null; count: number; newest: string | null }

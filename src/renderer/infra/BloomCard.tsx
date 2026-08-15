@@ -79,9 +79,10 @@ export function BloomCard({
   const needsRepair = deployed && !adminDeclared
   const needsReconcile = deployed && adminDeclared && !adminRendered
   const canLink = deployed && adminRendered
-  // Everything is in place and it still has not checked in. A different problem —
-  // most likely the sync store itself — so say that rather than blaming the prefix.
-  const stillUnregistered = canLink && !app.registered
+  // There is deliberately no `stillUnregistered` here any more. Registration is the
+  // Registry card's subject, for every app; this card is about the ADMIN key, which is
+  // a different credential for a different purpose — the GUI edits configuration, a
+  // peer agent spends money, and one leaked token must not buy both.
 
   const missingModelKey =
     adminDeclared && !declaredKeys.includes('BLOOM_OPENROUTER_API_KEY')
@@ -180,56 +181,17 @@ export function BloomCard({
         </div>
       )}
 
-      {/* Step 3: everything is in place and it still has not checked in. Different
-          problem, so different words — do not keep blaming the prefix. */}
-      {/* Bloom is healthy and holds a registry token, and the registry still refuses
-          it. The cause is almost always on the registry side and it is not obvious:
-          the sync-store reads SYNC_STORE_KEYS once, at startup, so an app whose token
-          was minted after the store last started is simply unknown to it. Every
-          registration attempt is a 401 that nothing surfaces.
+      {/* Step 3 used to be here: five sentences about why Bloom might not have
+          registered, hedged with "most likely" and "give it a moment", under a button
+          whose own tooltip described a different operation. It was hedged because this
+          card genuinely could not tell the causes apart — nothing reported the key list
+          the registry was actually running.
 
-          This used to say "check the sync store itself" and stop there, with the
-          Re-link button sitting underneath it — which reads as the remedy and is not
-          one. Re-link re-reads BLOOM_ADMIN_KEYS so *Aperture* can manage Bloom; it
-          has nothing to do with whether Bloom can reach the registry. */}
-      {stillUnregistered && (
-        <div className="flex flex-col gap-2 rounded-field border border-warn/50 bg-warn/10 p-2.5">
-          <p className="text-xs leading-relaxed text-warn">
-            Bloom has its keys but has not registered. It registers on startup and on a
-            heartbeat, so give it a moment after a restart.
-          </p>
-          <p className="text-micro leading-relaxed text-muted">
-            If it persists, the registry has most likely never been told about Bloom:
-            the sync-store loads its key list at startup, so an app declared after it
-            last started is rejected until it reloads. Re-running the install reloads
-            the key list and restarts the store only if it actually changed.
-            <strong className="text-ink">
-              {' '}
-              Update the amber-infra checkout on this box first
-            </strong>{' '}
-            — an older install.sh minted the token after starting the store and could
-            not fix this.
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <SmallButton
-              primary
-              disabled={needsPassword || !app.domain}
-              title={
-                needsPassword
-                  ? 'Enter the sudo password above first.'
-                  : 'Re-runs install.sh for Bloom, which reconciles the registry key list'
-              }
-              onClick={() => run('install', 'Reconcile bloom and the registry', installParams)}
-            >
-              Reload the registry
-            </SmallButton>
-            <span className="text-micro text-muted">
-              Re-link below is a different thing — it refreshes Aperture&apos;s admin
-              key, not Bloom&apos;s registry token.
-            </span>
-          </div>
-        </div>
-      )}
+          The Registry card at the top of this page can, now that status.sh reports both
+          sides of that list. It says one line, offers one button, and does it for every
+          app rather than only this one. Duplicating it here would put two different
+          accounts of the same failure on one screen, which is how the "Reload the
+          registry" and "Re-link" confusion started in the first place. */}
 
       {missingModelKey && (
         <p className="text-xs text-muted">

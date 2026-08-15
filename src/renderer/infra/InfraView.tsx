@@ -9,6 +9,7 @@ import { useStore } from '../store'
 import { DnsRecords } from './Dns'
 import { Card, Chip, Field, SmallButton } from './parts'
 import { BloomCard } from './BloomCard'
+import { RegistryCard } from './RegistryCard'
 import { Migration } from './Migration'
 import { Setup } from './Setup'
 import { useRunner } from './useRunner'
@@ -292,6 +293,18 @@ export function InfraView({
             {!status.secretsReadable && <Chip tone="warn">secrets unreadable</Chip>}
           </div>
 
+          {/* The registry, before the app list rather than behind Advanced mode.
+              "Which of these is actually linked" is a question about the whole box, it
+              was previously unanswerable anywhere in this app, and the answer belongs
+              next to the apps it is describing. The machinery it used to be — the flat
+              server list, the raw controls — is inside it, behind a disclosure. */}
+          <RegistryCard
+            status={status}
+            run={run}
+            advanced={advanced}
+            needsPassword={needsPassword}
+          />
+
           {status.warnings.length > 0 && (
             <ul className="flex flex-col gap-1 rounded-field border border-line px-3 py-2">
               {status.warnings.map((w) => (
@@ -454,7 +467,9 @@ export function InfraView({
 
                   <Settings status={status} run={run} disabled={needsPassword} />
 
-              <Registry status={status} run={run} disabled={needsPassword} />
+              {/* The Registry card used to be here, gated. It is above now, ungated,
+                  and its advanced half rides along inside it — so this block no longer
+                  owns the registry at all. */}
 
               <Card title="Backups" hint={status.backups.target ?? undefined}>
                 <div className="flex flex-wrap items-center gap-2">
@@ -581,92 +596,13 @@ function SettingRow({
   )
 }
 
-function Registry({
-  status,
-  run,
-  disabled,
-}: {
-  status: InfraStatus
-  run: (actionId: string, title: string, params?: Record<string, string>) => void
-  disabled: boolean
-}): React.JSX.Element {
-  const [name, setName] = useState('')
-  const [token, setToken] = useState('')
-
-  return (
-    <Card
-      title="Registry"
-      hint={
-        status.syncStore.url
-          ? `${status.syncStore.url} — what every agent reads to find its peers.`
-          : 'No sync-store configured.'
-      }
-    >
-      {/* The store is not an app and deliberately has no app card, so its two
-          controls live here. Restart matters more than it looks: the container reads
-          SYNC_STORE_KEYS at startup, so regenerating tokens without restarting is
-          what produces a 401 that reads like the store being down. */}
-      <div className="flex flex-wrap items-center gap-2">
-        <Chip tone={status.syncStore.reachable ? 'ok' : 'warn'}>
-          {status.syncStore.containerState}
-        </Chip>
-        {status.syncStore.detail && (
-          <span className="text-meta text-accent">{status.syncStore.detail}</span>
-        )}
-        <div className="flex-1" />
-        <SmallButton
-          disabled={disabled}
-          title="Needed after regenerating tokens — SYNC_STORE_KEYS is read at startup"
-          onClick={() => run('restart', 'Restart the sync-store', { app: 'sync-store' })}
-        >
-          Restart
-        </SmallButton>
-        <SmallButton
-          disabled={disabled}
-          onClick={() => run('logs', 'Logs — sync-store', { app: 'sync-store' })}
-        >
-          Logs
-        </SmallButton>
-      </div>
-
-      {status.syncStore.servers.length === 0 ? (
-        <p className="text-xs text-muted">Nothing registered, or the store did not answer.</p>
-      ) : (
-        <ul className="flex flex-col gap-1">
-          {status.syncStore.servers.map((s) => (
-            <li key={s.name} className="flex items-center gap-2 font-mono text-meta">
-              <span className="w-24 shrink-0 truncate text-ink">{s.name}</span>
-              <span className="min-w-0 flex-1 truncate text-muted">{s.baseUrl}</span>
-              {s.stale && <Chip tone="warn">stale</Chip>}
-              <span className="shrink-0 text-micro text-muted">{s.lastSeen ?? '—'}</span>
-              <SmallButton
-                danger
-                disabled={disabled}
-                onClick={() => run('deregister', `Deregister ${s.name}`, { name: s.name })}
-              >
-                ✕
-              </SmallButton>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {/* The one column the registration upsert deliberately never writes: a
-          300-second heartbeat would otherwise wipe every peer credential in the
-          ecosystem five minutes after it was set. */}
-      <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
-        <Field value={name} onChange={setName} placeholder="server name" />
-        <Field type="password" value={token} onChange={setToken} placeholder="peer token" />
-        <SmallButton
-          disabled={disabled || !name.trim() || !token.trim()}
-          onClick={() => run('setPeerToken', `Set the peer token for ${name.trim()}`, {
-            name: name.trim(),
-            token: token.trim(),
-          })}
-        >
-          Set peer token
-        </SmallButton>
-      </div>
-    </Card>
-  )
-}
+/*
+ * `Registry` used to live here: a chip, a Restart button, a flat list of whatever the
+ * store returned, and a set-peer-token form — all behind Advanced mode, which meant the
+ * one screen that could answer "is Bloom actually linked?" was the one screen most
+ * people never opened.
+ *
+ * It is `RegistryCard` now, mounted above and ungated. The flat list became a map, the
+ * per-row deregister became a diagnosed `orphan` with the same button, and the Restart
+ * button became `reloadRegistry` — which is what its tooltip always claimed it did.
+ */

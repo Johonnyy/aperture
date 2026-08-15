@@ -766,16 +766,51 @@ export const ACTIONS: Record<string, ActionDef> = {
 
   // --- the registry ---------------------------------------------------------
 
+  /**
+   * Make the running registry check against the key list secrets.yaml declares.
+   *
+   * The failure this ends: the sync-store reads `SYNC_STORE_KEYS` once, at container
+   * start. An app whose token was minted after the store last started gets a 401 on
+   * every registration attempt, forever, while its own `/health` returns 200 — and
+   * `agent_mcp`'s `register()` swallows the failure by contract, so the only symptom
+   * anywhere is the word "unregistered".
+   *
+   * The Registry card's old Restart button claimed to be this and was not: it points
+   * at `restart`, which is `compose up -d` with no `--force-recreate`, and
+   * install/lib/sync_store.sh says in so many words that it does not trust compose to
+   * notice an env-file change. So the affordance existed, described the right
+   * operation, and performed a different one.
+   *
+   * The logic itself lives in amber-infra, per the rule at the top of this file: this
+   * composes flags for `deploy/reload-registry.sh`, which reuses `ensure_sync_store`
+   * and then checks the *container's* own environment — the case ensure_sync_store
+   * cannot see, where the env file is already right and the container is not.
+   */
+  reloadRegistry: {
+    label: 'Reload the registry',
+    needsSudo: true,
+    rehearse: () => `bash ${script('deploy/reload-registry.sh')} --dry-run`,
+    build: () => `bash ${script('deploy/reload-registry.sh')}`,
+    timeoutMs: 5 * 60_000,
+  },
+
   setPeerToken: {
     label: 'Set peer token',
     needsSudo: true,
+    // Not `-f`: a 404 is a *finding* here — "that name is not registered yet" — and
+    // `-f` turns it into curl exiting 22 with no body, which reads as a broken tool
+    // rather than an answer.
     rehearse: (p) =>
-      `curl -fsS -o /dev/null -w 'registry says %{http_code}\\n' ` +
+      `curl -sS -o /dev/null -w 'registry says %{http_code}\\n' ` +
       `-H "Authorization: Bearer ${ADMIN_TOKEN}" ${SYNC_BASE}/servers/${q(p.name)}`,
     // The token arrives on stdin via a quoted heredoc, so it is neither expanded by
     // the shell nor visible in `ps` on the far end.
+    //
+    // The path is `/servers/{name}/token`, not `/servers/{name}`. The store has no PUT
+    // on the bare path — that one is the DELETE `deregister` uses — so this action has
+    // been answering 405 for every call it has ever made.
     build: (p) =>
-      `curl -fsS -X PUT ${SYNC_BASE}/servers/${q(p.name)} ` +
+      `curl -fsS -X PUT ${SYNC_BASE}/servers/${q(p.name)}/token ` +
       `-H "Authorization: Bearer ${ADMIN_TOKEN}" -H 'Content-Type: application/json' ` +
       `--data @- <<'APERTURE_EOF'\n${JSON.stringify({ token: p.token })}\nAPERTURE_EOF`,
   },

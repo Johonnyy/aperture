@@ -69,6 +69,9 @@ const EMPTY: InfraStatus = {
   dns: { publicIp: null, records: [] },
   apps: [],
   caddy: { running: false, health: 'missing', sites: [] },
+  // `keys` is deliberately absent rather than an empty pair: a box on an older
+  // status.sh has not told us it has no keys, it has not told us anything, and the
+  // registry map has to be able to say so.
   syncStore: { url: null, reachable: false, servers: [], containerState: 'missing', detail: null },
   history: [],
   backups: { target: null, count: 0, newest: null },
