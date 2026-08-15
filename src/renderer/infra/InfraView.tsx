@@ -5,6 +5,7 @@ import { AppCard } from './AppCard'
 import { Catalogue } from './Catalogue'
 import { DnsRecords } from './Dns'
 import { Card, Chip, Field, SmallButton } from './parts'
+import { BloomCard } from './BloomCard'
 import { Migration } from './Migration'
 import { Setup } from './Setup'
 import { useRunner } from './useRunner'
@@ -205,6 +206,13 @@ export function InfraView({
 
       {status?.installed && status.schema >= EXPECTED_SCHEMA && (
         <>
+          <BloomCard
+            status={status}
+            serverId={server.id}
+            sudoPassword={sudoPassword}
+            needsPassword={needsPassword}
+          />
+
           <Migration
             status={status}
             run={run}

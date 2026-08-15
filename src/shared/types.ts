@@ -53,6 +53,14 @@ export type ApertureEvent =
    * several runs can be in flight at once.
    */
   | { kind: 'bloom-run'; runId: string; event: BloomRunEvent }
+  /**
+   * A browser finished an OAuth flow and handed control back via `aperture://`.
+   *
+   * Carries only which provider it was, and even that is a hint: the URL is
+   * attacker-reachable, so the renderer answers by re-reading the connection status
+   * from Bloom, which is the only thing that knows what actually happened.
+   */
+  | { kind: 'bloom-oauth'; provider: string | null }
 
 // --- operation logs ---------------------------------------------------------
 

@@ -77,4 +77,6 @@ export const IPC = {
   BLOOM_OAUTH_DISCONNECT: 'bloom:oauth-disconnect',
 
   BLOOM_USAGE: 'bloom:usage',
+  /** Pull a deep link that landed before the renderer was listening. */
+  BLOOM_OAUTH_PENDING: 'bloom:oauth-pending',
 } as const

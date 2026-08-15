@@ -5,6 +5,10 @@ import { SmallButton } from '../infra/parts'
 import { useStore } from '../store'
 import { AgentEditor } from './AgentEditor'
 import { AgentList } from './AgentList'
+import { Connections } from './Connections'
+import { RunHistory } from './RunHistory'
+import { TestRun } from './TestRun'
+import { Usage } from './Usage'
 
 /**
  * The Bloom tab.
@@ -91,14 +95,28 @@ export function BloomView(): React.JSX.Element {
 
       {tab === 'agents' &&
         (editing ? (
-          <AgentEditor
-            agent={editing === 'new' ? null : editing}
-            onClose={() => setEditing(null)}
-            onSaved={() => {
-              setEditing(null)
-              void refresh()
-            }}
-          />
+          <>
+            <AgentEditor
+              agent={editing === 'new' ? null : editing}
+              onClose={() => setEditing(null)}
+              onSaved={() => {
+                setEditing(null)
+                void refresh()
+              }}
+            />
+            {/* Only for an agent that exists: connecting an account and running a
+                task both need an id, and a draft has none yet. */}
+            {editing !== 'new' && (
+              <>
+                <Connections agent={editing} />
+                <TestRun agent={editing} />
+                <div className="rounded-panel border border-line bg-raised/50 p-3">
+                  <h3 className="mb-2 text-sm font-medium">Recent runs</h3>
+                  <RunHistory agentId={editing.id} />
+                </div>
+              </>
+            )}
+          </>
         ) : (
           <AgentList
             agents={agents}
@@ -109,10 +127,8 @@ export function BloomView(): React.JSX.Element {
           />
         ))}
 
-      {tab === 'activity' && (
-        <p className="text-xs text-muted">Run history lands here next.</p>
-      )}
-      {tab === 'usage' && <p className="text-xs text-muted">Cost lands here next.</p>}
+      {tab === 'activity' && <RunHistory />}
+      {tab === 'usage' && <Usage />}
     </section>
   )
 }

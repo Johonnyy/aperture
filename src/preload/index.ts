@@ -273,6 +273,9 @@ const api = {
 
     usage: (since?: string): Promise<BloomCall<UsageReport | null>> =>
       ipcRenderer.invoke(IPC.BLOOM_USAGE, since),
+    /** Any `aperture://` handoff that arrived before this window was listening. */
+    pendingOAuth: (): Promise<{ provider: string | null } | null> =>
+      ipcRenderer.invoke(IPC.BLOOM_OAUTH_PENDING),
   },
 
   bridge: {

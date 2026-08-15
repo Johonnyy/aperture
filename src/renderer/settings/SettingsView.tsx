@@ -76,6 +76,10 @@ export function SettingsView(): React.JSX.Element {
 
       <hr className="border-0 border-t border-line" />
 
+      <BloomSection />
+
+      <hr className="border-0 border-t border-line" />
+
       <label className="flex flex-col gap-1.5">
         <span className="text-sm">Amber URL</span>
         <input
@@ -322,5 +326,116 @@ function Toggle({
         <span className="text-xs text-muted">{hint}</span>
       </span>
     </label>
+  )
+}
+
+/**
+ * Linking Bloom by hand.
+ *
+ * The usual path is the Servers tab, which reads the admin key off the box over SSH
+ * — that is where the sudo password already lives, transiently, and it is the only
+ * place it should. This is the escape hatch: a local instance during development, or
+ * a Bloom no configured server reaches.
+ *
+ * The key goes straight into the OS keychain in main and never comes back across
+ * the bridge, so there is nothing to display and no way to reveal it — only to
+ * replace it or forget it.
+ */
+function BloomSection(): React.JSX.Element {
+  const link = useStore((s) => s.bloomLink)
+  const setBloomLink = useStore((s) => s.setBloomLink)
+  const [url, setUrl] = useState('')
+  const [token, setToken] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const field =
+    'w-full rounded-field border border-line bg-ground px-3 py-2 text-sm text-ink outline-none focus:border-accent-deep'
+
+  const linkNow = async (): Promise<void> => {
+    setBusy(true)
+    setError(null)
+    const result = await window.aperture.bloom.linkManually(url, token)
+    setBusy(false)
+    if (result.link) setBloomLink(result.link)
+    if (result.ok) {
+      setUrl('')
+      setToken('')
+    } else {
+      setError(result.error ?? 'Could not link Bloom.')
+    }
+  }
+
+  const unlink = async (): Promise<void> => {
+    if (!window.confirm('Forget this Bloom? Its admin key is deleted from this machine.')) return
+    setBloomLink(await window.aperture.bloom.unlink())
+  }
+
+  return (
+    <fieldset className="flex flex-col gap-3 border-0 p-0">
+      <legend className="text-sm">Bloom</legend>
+
+      {link.state === 'unlinked' ? (
+        <p className="text-xs text-muted">
+          Not linked. The usual way is the Servers tab, which reads the key off the
+          box for you — this is for a local instance, or one no server reaches.
+        </p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="min-w-0 flex-1 truncate font-mono text-meta text-muted">
+            {link.baseUrl} · {link.state}
+          </span>
+          <button
+            type="button"
+            onClick={() => void unlink()}
+            className="rounded-field border border-line px-3 py-1.5 text-sm text-muted transition hover:border-danger/50 hover:text-danger"
+          >
+            Forget
+          </button>
+        </div>
+      )}
+
+      {error && <p className="text-xs text-danger">{error}</p>}
+
+      <label className="flex flex-col gap-1.5">
+        <span className="text-sm">Address</span>
+        <input
+          className={field}
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="http://localhost:8010"
+        />
+        <span className="text-xs text-muted">
+          Plain http is allowed only for localhost — the admin key grants full control,
+          and sending it unencrypted to a public host is refused.
+        </span>
+      </label>
+
+      <label className="flex flex-col gap-1.5">
+        <span className="text-sm">Admin key</span>
+        <input
+          className={field}
+          type="password"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          placeholder="from BLOOM_ADMIN_KEYS"
+        />
+        <span className="text-xs text-muted">
+          Stored in the OS keychain, never in a settings file. It is not readable back
+          from here once saved.
+        </span>
+      </label>
+
+      <div>
+        <button
+          type="button"
+          disabled={busy || !url.trim() || !token.trim()}
+          onClick={() => void linkNow()}
+          className="rounded-field border border-accent-deep bg-accent/15 px-4 py-2 text-sm text-accent-hi transition hover:bg-accent/25 disabled:opacity-40"
+        >
+          {busy ? 'Linking…' : 'Link Bloom'}
+        </button>
+      </div>
+    </fieldset>
   )
 }

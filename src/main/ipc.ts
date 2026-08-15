@@ -14,6 +14,7 @@ import type {
 import type { AmberConnection } from './amber/connection'
 import type { ToolBridge } from './amber/tool-bridge'
 import * as bloomApi from './bloom'
+import { take as takePendingDeepLink } from './bloom/deep-link'
 import * as bloom from './bloom/link'
 import {
   addServer,
@@ -362,6 +363,15 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
   )
 
   ipcMain.handle(IPC.BLOOM_USAGE, (_e, since?: string) => bloomApi.usage(emit, since))
+
+  /**
+   * A deep link that landed before the renderer was listening.
+   *
+   * `emit` is documented as safe-to-drop, and normally that is fine — but a dropped
+   * OAuth handoff strands the user on "waiting for authorization" forever, so this
+   * one is buffered and pulled on mount instead.
+   */
+  ipcMain.handle(IPC.BLOOM_OAUTH_PENDING, () => takePendingDeepLink())
 
   // --- audit ----------------------------------------------------------------
 

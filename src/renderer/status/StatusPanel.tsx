@@ -97,6 +97,9 @@ export function StatusPanel(): React.JSX.Element {
         </div>
       )}
 
+      {/* --- an in-flight Bloom run --- */}
+      <BloomRunCard />
+
       {/* --- live trace --- */}
       <div className="flex min-h-0 flex-1 flex-col">
         <h2 className="px-4 pt-3 pb-2 text-meta font-semibold tracking-wide text-muted uppercase">
@@ -105,7 +108,7 @@ export function StatusPanel(): React.JSX.Element {
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-3">
           {trace.length === 0 ? (
             <p className="text-xs text-muted">
-              Frames appear here as Amber works through a turn.
+              Activity appears here as Amber and her backends work.
             </p>
           ) : (
             <ul className="flex flex-col gap-1 font-mono text-meta">
@@ -137,8 +140,9 @@ export function StatusPanel(): React.JSX.Element {
       </div>
 
       <p className="border-t border-line px-4 py-2 text-micro leading-snug text-muted">
-        Shows frames Amber sends over the wire. Her own server-side tool calls happen
-        inside the agent loop and aren&apos;t visible here.
+        Shows frames Amber sends over the wire, and Bloom runs as they happen. Her
+        own server-side tool calls run inside the agent loop and aren&apos;t visible
+        here.
       </p>
 
       {/* --- audit log --- */}
@@ -223,6 +227,54 @@ function ApprovalCard({ approval }: { approval: PendingApproval }): React.JSX.El
         >
           Deny
         </button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * A Bloom run in flight, watchable from any tab.
+ *
+ * The run keeps going whether or not the Bloom tab is open — the stream lives in
+ * main — so this is the one place that says so while you are somewhere else, and
+ * the one place you can stop it from.
+ *
+ * Only the newest unfinished run: several can be in flight, but a column this narrow
+ * showing three at once would be a list nobody reads. The Bloom tab has the rest.
+ */
+function BloomRunCard(): React.JSX.Element | null {
+  const runs = useStore((s) => s.bloomRuns)
+
+  const entries = Object.entries(runs).filter(([, run]) => !run.done)
+  const newest = entries.at(-1)
+  if (!newest) return null
+
+  const [runId, run] = newest
+  const started = run.events.find((e) => e.kind === 'run_started')
+  const agent = String(started?.payload.agent_slug ?? 'an agent')
+  const lastTool = [...run.events].reverse().find((e) => e.kind === 'tool_started')
+  const lastText = [...run.events].reverse().find((e) => e.kind === 'text')
+
+  return (
+    <div className="border-b border-line px-4 py-3">
+      <h2 className="mb-2 text-meta font-semibold tracking-wide text-muted uppercase">
+        Bloom is working
+      </h2>
+      <div className="rounded-field border border-accent/40 bg-accent/10 px-3 py-2">
+        <div className="flex items-center gap-2">
+          <span className="h-2 w-2 shrink-0 animate-pulse-dot rounded-full bg-accent" />
+          <span className="min-w-0 flex-1 truncate font-mono text-meta text-ink">{agent}</span>
+          <button
+            type="button"
+            onClick={() => void window.aperture.bloom.cancelRun(runId)}
+            className="rounded-control border border-line px-2 py-0.5 text-micro text-muted transition hover:border-danger/50 hover:text-danger"
+          >
+            Stop
+          </button>
+        </div>
+        <p className="mt-1 line-clamp-2 text-xs text-muted">
+          {lastTool ? `${lastTool.toolName ?? 'running a tool'}…` : String(lastText?.payload.text ?? 'thinking…')}
+        </p>
       </div>
     </div>
   )
