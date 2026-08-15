@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain, nativeTheme } from 'electron'
 import { randomUUID } from 'node:crypto'
 
+import type { BloomLink } from '../shared/bloom'
 import { IPC } from '../shared/ipc'
 import { paletteFor } from '../shared/theme'
 import type {
@@ -12,6 +13,7 @@ import type {
 } from '../shared/types'
 import type { AmberConnection } from './amber/connection'
 import type { ToolBridge } from './amber/tool-bridge'
+import * as bloom from './bloom/link'
 import {
   addServer,
   clearAudit,
@@ -274,6 +276,44 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
   ipcMain.handle(IPC.BRIDGE_APPROVE, (_e, id: string) => bridge.resolveApproval(id, true))
   ipcMain.handle(IPC.BRIDGE_DENY, (_e, id: string) => bridge.resolveApproval(id, false))
   ipcMain.handle(IPC.BRIDGE_PENDING, () => bridge.listPending())
+
+  // --- bloom ----------------------------------------------------------------
+
+  /**
+   * The link record, straight off disk.
+   *
+   * Deliberately does no I/O beyond the vault: this is what the sidebar reads to
+   * decide whether the Bloom tab exists, so it has to answer immediately even with
+   * every server unreachable.
+   */
+  ipcMain.handle(IPC.BLOOM_LINK, (): BloomLink => bloom.getLink())
+
+  /**
+   * Read Bloom off a box over SSH.
+   *
+   * `sudoPassword` arrives per call and is never written anywhere — same contract as
+   * `INFRA_RUN`. The token it recovers goes straight into the `safeStorage` vault and
+   * is never returned to the renderer.
+   */
+  ipcMain.handle(
+    IPC.BLOOM_DISCOVER,
+    async (_e, serverId: string, domain: string, sudoPassword?: string) => {
+      const server = getServer(serverId)
+      if (!server) return { ok: false, error: 'Unknown server.' }
+      return bloom.linkFromServer(emit, `bloom-link-${serverId}`, server, { domain, sudoPassword })
+    },
+  )
+
+  ipcMain.handle(IPC.BLOOM_LINK_MANUAL, async (_e, baseUrl: string, token: string) =>
+    bloom.linkManually(emit, baseUrl, token),
+  )
+
+  ipcMain.handle(IPC.BLOOM_UNLINK, (): BloomLink => bloom.unlink(emit))
+
+  ipcMain.handle(IPC.BLOOM_VERIFY, async (): Promise<BloomLink> => {
+    await bloom.verifyLink(emit)
+    return bloom.getLink()
+  })
 
   // --- audit ----------------------------------------------------------------
 

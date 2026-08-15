@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
 
+import type { BloomLink } from '../shared/bloom'
 import { IPC } from '../shared/ipc'
 import type {
   ApertureEvent,
@@ -30,6 +31,11 @@ export interface ShellMessage {
 const THEME_FLAG = '--aperture-theme='
 const THEME_ARG =
   process.argv.find((arg) => arg.startsWith(THEME_FLAG))?.slice(THEME_FLAG.length) ?? ''
+
+/** Whether a Bloom link exists, as main knew it when the window was created. */
+const BLOOM_FLAG = '--aperture-bloom='
+const BLOOM_AT_LAUNCH =
+  process.argv.find((arg) => arg.startsWith(BLOOM_FLAG))?.slice(BLOOM_FLAG.length) === '1'
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
   const listener = (_e: IpcRendererEvent, payload: T): void => cb(payload)
@@ -156,6 +162,41 @@ const api = {
     ): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC.INFRA_RUN, opId, serverId, actionId, params, opts),
     cancel: (opId: string): Promise<boolean> => ipcRenderer.invoke(IPC.INFRA_CANCEL, opId),
+  },
+
+  bloom: {
+    /**
+     * Whether the sidebar row exists at all, seeded from argv.
+     *
+     * Read the same way as `theme.initial`, and for the same reason: `link()` is a
+     * round trip, so gating the row on it pops the row in a frame after paint and
+     * reflows the nav. Argv carries the one boolean that decides *presence*; the
+     * five-valued state settles asynchronously and only changes the row's dot.
+     */
+    linkedAtLaunch: BLOOM_AT_LAUNCH,
+    /** The stored record. Answered from disk, so it is safe to call on mount. */
+    link: (): Promise<BloomLink> => ipcRenderer.invoke(IPC.BLOOM_LINK),
+    /**
+     * Find Bloom on a box and read its admin key.
+     *
+     * `sudoPassword` is used for this one call and never stored — the key file is
+     * root-only by design. The key itself never comes back across this bridge.
+     */
+    discover: (
+      serverId: string,
+      domain: string,
+      sudoPassword?: string,
+    ): Promise<{ ok: boolean; link?: BloomLink; error?: string; needsSudo?: boolean }> =>
+      ipcRenderer.invoke(IPC.BLOOM_DISCOVER, serverId, domain, sudoPassword),
+    /** Point at a Bloom by hand — a local instance, or one no SSH server reaches. */
+    linkManually: (
+      baseUrl: string,
+      token: string,
+    ): Promise<{ ok: boolean; link?: BloomLink; error?: string }> =>
+      ipcRenderer.invoke(IPC.BLOOM_LINK_MANUAL, baseUrl, token),
+    unlink: (): Promise<BloomLink> => ipcRenderer.invoke(IPC.BLOOM_UNLINK),
+    /** Re-check reachability and the key now. Cannot unlink, only demote. */
+    verify: (): Promise<BloomLink> => ipcRenderer.invoke(IPC.BLOOM_VERIFY),
   },
 
   bridge: {

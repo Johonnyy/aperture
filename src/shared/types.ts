@@ -1,5 +1,6 @@
 /** Types shared across main, preload and renderer — the IPC vocabulary. */
 
+import type { BloomLink, BloomRunEvent } from './bloom'
 import type { AudioChunkFrame, ServerFrame } from './protocol'
 import { DEFAULT_THEME, type ThemeId } from './theme'
 
@@ -41,6 +42,17 @@ export type ApertureEvent =
   /** One narrated step of a long-running operation (see `OpLogEntry`). */
   | { kind: 'op'; opId: string; entry: OpLogEntry }
   | { kind: 'op-done'; opId: string; ok: boolean; error?: string }
+  /**
+   * Where we stand with Bloom. The whole record every time, never a delta, so a
+   * dropped event cannot leave the sidebar showing a state that has moved on.
+   */
+  | { kind: 'bloom-link'; link: BloomLink }
+  /**
+   * One entry in a Bloom run's trace. `runId` rides on the envelope rather than in
+   * the payload so the reducer can key its bucket without unwrapping — and because
+   * several runs can be in flight at once.
+   */
+  | { kind: 'bloom-run'; runId: string; event: BloomRunEvent }
 
 // --- operation logs ---------------------------------------------------------
 

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 
+import { containerExists } from '../../shared/bloom'
 import type { InfraApp } from '../../shared/types'
 import { EnvEditor } from './EnvEditor'
 import { Chip, Field, SmallButton } from './parts'
@@ -12,31 +13,11 @@ import type { Params } from './useRunner'
  * pin was bumped and nothing restarted, or when a container was started by hand — the
  * state where every dashboard says "healthy" and the code running is not the code you
  * think. Everything else on the card is context for that.
- */
-/**
- * Docker's own container states. Anything else — "missing", an empty string, or the
- * "<no value>" a Go template yields when asked for `.State` on something that is not
- * a container — means there is nothing running under this name.
  *
- * Matching the set rather than the sentinel is the point. This used to test
- * `container === 'missing'`, so one unexpected string from the far end silently
- * flipped the card into "deployed": four status chips and no Install button, on a box
- * with no container at all.
+ * `containerExists` used to live here. It moved to `shared/bloom.ts` when the Bloom
+ * link needed the same predicate — a second copy of that list would be the same bug
+ * it already caused once, with a delay fuse.
  */
-const CONTAINER_STATES = [
-  'running',
-  'restarting',
-  'paused',
-  'exited',
-  'created',
-  'dead',
-  'removing',
-]
-
-function containerExists(state: string): boolean {
-  return CONTAINER_STATES.includes(state.trim())
-}
-
 export function AppCard({
   app,
   run,

@@ -1,14 +1,19 @@
 import { randomUUID } from 'node:crypto'
 
+import { EMPTY_BLOOM_LINK, type BloomLink } from '../shared/bloom'
 import { DEFAULT_SETTINGS, type AuditEntry, type ServerConfig, type Settings } from '../shared/types'
 import { JsonStore } from './store'
 
 /** How many audit entries to keep. It's a record of recent activity, not an archive. */
 const AUDIT_CAP = 500
 
+/** The persisted half of a `BloomLink` — `hasToken` is derived, see `bloom/link.ts`. */
+type BloomRecord = Omit<BloomLink, 'hasToken'>
+
 let settingsStore: JsonStore<Settings> | null = null
 let serversStore: JsonStore<{ servers: ServerConfig[] }> | null = null
 let auditStore: JsonStore<{ entries: AuditEntry[] }> | null = null
+let bloomStore: JsonStore<BloomRecord> | null = null
 
 // Lazily constructed: `app.getPath('userData')` isn't valid until Electron is ready.
 function settings(): JsonStore<Settings> {
@@ -20,6 +25,13 @@ function servers(): JsonStore<{ servers: ServerConfig[] }> {
 function audit(): JsonStore<{ entries: AuditEntry[] }> {
   // Separate file so clearing the audit log can't disturb app config.
   return (auditStore ??= new JsonStore('audit.json', { entries: [] }))
+}
+function bloom(): JsonStore<BloomRecord> {
+  // A file per concern, like audit.json. Kept flat because JsonStore merges exactly
+  // one level over its defaults — a nested object from an older build would arrive
+  // partial, cast as complete, and `strict` would never see it.
+  const { hasToken: _derived, ...defaults } = EMPTY_BLOOM_LINK
+  return (bloomStore ??= new JsonStore<BloomRecord>('bloom.json', defaults))
 }
 
 // --- settings ---------------------------------------------------------------
@@ -75,4 +87,18 @@ export function appendAudit(entry: AuditEntry): AuditEntry {
 
 export function clearAudit(): void {
   audit().set({ entries: [] })
+}
+
+// --- bloom ------------------------------------------------------------------
+//
+// The record only. The admin token lives in `bloom/token-store.ts` behind
+// `safeStorage`, and `hasToken` is derived from it on every read rather than
+// persisted here — see `bloom/link.ts`.
+
+export function getBloomRecord(): BloomRecord {
+  return bloom().get()
+}
+
+export function setBloomRecord(record: BloomRecord): BloomRecord {
+  return bloom().replace(record)
 }

@@ -2,7 +2,7 @@ import { BrowserWindow, shell } from 'electron'
 import { join } from 'node:path'
 
 import { paletteFor, titleBarColor, type Palette } from '../shared/theme'
-import { getSettings } from './config'
+import { getBloomRecord, getSettings } from './config'
 
 /** Matches `--titlebar-height` in styles.css and the `env(titlebar-area-*)` box. */
 export const TITLE_BAR_HEIGHT = 36
@@ -54,7 +54,14 @@ export function createWindow(): BrowserWindow {
     ...titleBarOverlayFor(theme),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      additionalArguments: [`--aperture-theme=${theme.id}`],
+      additionalArguments: [
+        `--aperture-theme=${theme.id}`,
+        // Whether the Bloom sidebar row exists, for the same reason the theme is
+        // here: asking main over IPC costs a round trip, so the row would pop in a
+        // frame after paint and reflow the nav. One boolean decides *presence*; the
+        // link's five-valued state settles asynchronously and only moves its dot.
+        `--aperture-bloom=${getBloomRecord().state === 'unlinked' ? '0' : '1'}`,
+      ],
       // The renderer runs untrusted-ish UI code and has no business touching Node.
       // Everything privileged (the socket, SSH, the key vault) lives in main and is
       // reached through the narrow contextBridge surface in preload.

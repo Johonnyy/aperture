@@ -4,6 +4,7 @@ import { IPC } from '../shared/ipc'
 import type { ApertureEvent } from '../shared/types'
 import { AmberConnection } from './amber/connection'
 import { ToolBridge } from './amber/tool-bridge'
+import { verifyLink } from './bloom/link'
 import { getSettings } from './config'
 import { registerIpc } from './ipc'
 import { closeAllShells } from './ssh/ssh-client'
@@ -67,6 +68,13 @@ app.whenReady().then(() => {
   registerIpc({ amber, bridge, emit })
 
   mainWindow = createWindow()
+
+  // Deliberately after the window and deliberately not awaited. The sidebar has
+  // already decided whether the Bloom row exists — from disk, via argv — so this is
+  // only ever a demotion: it can mark the link unreachable or its key rejected, and
+  // can never unlink. Awaiting it would put a network round trip in front of first
+  // paint for a question the disk already answered.
+  void verifyLink(emit)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow()

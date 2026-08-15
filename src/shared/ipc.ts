@@ -45,4 +45,15 @@ export const IPC = {
 
   AUDIT_LIST: 'audit:list',
   AUDIT_CLEAR: 'audit:clear',
+
+  /** The link record, answered from disk — synchronous enough to gate the sidebar. */
+  BLOOM_LINK: 'bloom:link',
+  /** Read Bloom off a box over SSH. Needs the sudo password the Servers tab holds. */
+  BLOOM_DISCOVER: 'bloom:discover',
+  /** Point at a Bloom by hand — a local instance, or one no SSH server reaches. */
+  BLOOM_LINK_MANUAL: 'bloom:link-manual',
+  /** Forget it. The only path back to `unlinked`. */
+  BLOOM_UNLINK: 'bloom:unlink',
+  /** Re-check reachability and the token now, rather than waiting for a call. */
+  BLOOM_VERIFY: 'bloom:verify',
 } as const
