@@ -211,6 +211,7 @@ export function InfraView({
             serverId={server.id}
             sudoPassword={sudoPassword}
             needsPassword={needsPassword}
+            run={run}
           />
 
           <Migration

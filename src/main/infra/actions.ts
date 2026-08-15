@@ -190,6 +190,129 @@ const DIRTY_CHECK = [
 const ADMIN_TOKEN = `$(yq -r '.sync_store.keys[] | select(.name == "amber") | .token' ${q(SECRETS)} | head -n1)`
 const SYNC_BASE = `$(yq -r '.sync_store.url' ${q(SECRETS)})`
 
+/**
+ * The env prefix an app's discovery keys are written under.
+ *
+ * `AGENT_MCP` is right for a plain agent-mcp-py consumer, which is most of them.
+ * Normalised because a trailing underscore is the obvious thing to type and would
+ * otherwise produce `BLOOM_MCP__KEYS`.
+ */
+function envPrefix(p: Params): string {
+  const raw = (p.envPrefix || 'AGENT_MCP').trim().toUpperCase()
+  return raw.replace(/_+$/, '') || 'AGENT_MCP'
+}
+
+/**
+ * The Bloom repair, as one script, in rehearsal or for real.
+ *
+ * Written once and branched on `dry` so the rehearsal cannot drift from the thing it
+ * rehearses — the failure mode where a dry run reports a step the real run does not
+ * take is worse than having no rehearsal at all.
+ *
+ * A Fernet key is 32 random bytes in urlsafe base64. `openssl rand -base64 32` with
+ * `+/` translated to `-_` is exactly that, which means no Python is needed on the
+ * box — `openssl` is already a hard dependency of install.sh.
+ */
+function BLOOM_REPAIR(p: Params, dry: boolean): string {
+  const app = p.app || 'bloom'
+  const prefix = 'BLOOM_MCP'
+  const domain = p.domain || ''
+  const A = q(app)
+  const say = (msg: string): string => `echo " ok  ${dry ? 'would ' : ''}${msg}"`
+  // In a rehearsal every mutation becomes a report, so the two paths stay in step.
+  const write = (cmd: string, msg: string): string => (dry ? say(msg) : `${cmd} && ${say(msg)}`)
+
+  return [
+    'set -e',
+    `command -v yq >/dev/null || { echo "error: yq is not installed on this box."; exit 127; }`,
+    `yq -e ${q(`.apps."${app}"`)} ${q(SECRETS)} >/dev/null 2>&1 || { echo "error: ${app} is not declared in secrets.yaml."; exit 1; }`,
+    dry ? '' : `cp -a ${q(SECRETS)} ${q(`${SECRETS}.bak`)}`,
+
+    // 0. Report what is actually on the box, before touching it.
+    //
+    // `env_prefix` is not in the status document, so this is the only place the
+    // cause can be *seen* rather than inferred. Reading the rendered env file is the
+    // clincher: install.sh writes the three discovery keys there under whatever
+    // prefix it resolved, so whichever `*_PUBLIC_URL` appears names the bug.
+    `echo "==> what this box has now"`,
+    `echo "     env_prefix: $(yq -r ${q(`.apps."${app}".env_prefix // "(not set — defaults to AGENT_MCP)"`)} ${q(SECRETS)})"`,
+    `ENVF=${q(`${INFRA_ETC}/${app}/${app}.env`)}`,
+    `if [ -r "$ENVF" ]; then`,
+    `  FOUND="$(grep -oE '^[A-Z_]+_PUBLIC_URL' "$ENVF" | head -n1)"`,
+    `  echo "     rendered env has: \${FOUND:-no *_PUBLIC_URL at all}"`,
+    `  case "$FOUND" in`,
+    `    BLOOM_MCP_PUBLIC_URL) echo "     that is the one Bloom reads." ;;`,
+    `    "") echo " !  no discovery keys were written, so it cannot register." ;;`,
+    `    *) echo " !  Bloom reads BLOOM_MCP_PUBLIC_URL, so that one is ignored. This is the bug." ;;`,
+    `  esac`,
+    `else`,
+    `  echo "     (its env file is not readable from here)"`,
+    `fi`,
+
+    // 1. The prefix itself — the root cause.
+    `CUR="$(yq -r ${q(`.apps."${app}".env_prefix // ""`)} ${q(SECRETS)})"`,
+    `if [ "$CUR" != "${prefix}" ]; then`,
+    `  ${write(`A=${A} V=${q(prefix)} yq -i '.apps[strenv(A)].env_prefix = strenv(V)' ${q(SECRETS)}`, `set env_prefix to ${prefix} (currently: $CUR)`)}`,
+    `else echo " ok  env_prefix is already ${prefix}"; fi`,
+
+    // 2. Move the bearer token to the name Bloom actually reads, keeping its value
+    //    so anything already holding it stays valid.
+    `OLD="$(yq -r ${q(`.apps."${app}".env.AGENT_MCP_KEYS // ""`)} ${q(SECRETS)})"`,
+    `NEW="$(yq -r ${q(`.apps."${app}".env.BLOOM_MCP_KEYS // ""`)} ${q(SECRETS)})"`,
+    `if [ -z "$NEW" ] && [ -n "$OLD" ]; then`,
+    `  ${write(`A=${A} V="$OLD" yq -i '.apps[strenv(A)].env.BLOOM_MCP_KEYS = strenv(V)' ${q(SECRETS)}`, 'move AGENT_MCP_KEYS to BLOOM_MCP_KEYS, keeping its token')}`,
+    `elif [ -z "$NEW" ]; then`,
+    `  ${write(`A=${A} V="amber:$(openssl rand -hex 32)" yq -i '.apps[strenv(A)].env.BLOOM_MCP_KEYS = strenv(V)' ${q(SECRETS)}`, 'generate BLOOM_MCP_KEYS')}`,
+    `else echo " ok  BLOOM_MCP_KEYS is already set"; fi`,
+    `if [ -n "$OLD" ]; then`,
+    `  ${write(`A=${A} yq -i 'del(.apps[strenv(A)].env.AGENT_MCP_KEYS)' ${q(SECRETS)}`, 'remove the stale AGENT_MCP_KEYS, which Bloom ignores')}`,
+    `fi`,
+
+    // 3. Aperture's own key. Separate from the peer key on purpose: a GUI that can
+    //    edit configuration must not hold one that also authorises spending.
+    `if [ -z "$(yq -r ${q(`.apps."${app}".env.BLOOM_ADMIN_KEYS // ""`)} ${q(SECRETS)})" ]; then`,
+    `  ${write(`A=${A} V="Aperture:$(openssl rand -hex 32)" yq -i '.apps[strenv(A)].env.BLOOM_ADMIN_KEYS = strenv(V)' ${q(SECRETS)}`, 'generate BLOOM_ADMIN_KEYS, which is what the Bloom tab authenticates with')}`,
+    `else echo " ok  BLOOM_ADMIN_KEYS is already set"; fi`,
+
+    // 4. The database path inside the container's volume.
+    `if [ -z "$(yq -r ${q(`.apps."${app}".env.BLOOM_DB_PATH // ""`)} ${q(SECRETS)})" ]; then`,
+    `  ${write(`A=${A} V=${q('/data/bloom.db')} yq -i '.apps[strenv(A)].env.BLOOM_DB_PATH = strenv(V)' ${q(SECRETS)}`, 'set BLOOM_DB_PATH to /data/bloom.db')}`,
+    `else echo " ok  BLOOM_DB_PATH is already set"; fi`,
+
+    // 5. Token encryption. Urlsafe base64 of 32 bytes IS a Fernet key — Bloom
+    //    rejects a hex string at startup rather than storing a token it could not
+    //    protect, so `openssl rand -hex 32` would be silently wrong here.
+    `if [ -z "$(yq -r ${q(`.apps."${app}".env.BLOOM_FERNET_KEYS // ""`)} ${q(SECRETS)})" ]; then`,
+    `  ${write(`A=${A} V="$(openssl rand -base64 32 | tr '+/' '-_')" yq -i '.apps[strenv(A)].env.BLOOM_FERNET_KEYS = strenv(V)' ${q(SECRETS)}`, 'generate BLOOM_FERNET_KEYS for encrypting connected-account tokens')}`,
+    `else echo " ok  BLOOM_FERNET_KEYS is already set"; fi`,
+
+    // 6. Amber's side. She resolves peers ONLY from the static map — she never reads
+    //    the sync store's discovered layer — so without this Bloom can register
+    //    perfectly and still be uncallable, with no error anywhere.
+    domain
+      ? [
+          `TOK="$(yq -r ${q(`.apps."${app}".env.BLOOM_MCP_KEYS // ""`)} ${q(SECRETS)} | sed 's/^[^:]*://')"`,
+          `if yq -e '.apps.amber' ${q(SECRETS)} >/dev/null 2>&1; then`,
+          `  ${write(`V=${q(`${app}=https://${domain}`)} yq -i '.apps.amber.env.AMBER_MCP_PEERS = strenv(V)' ${q(SECRETS)}`, `point Amber at https://${domain}`)}`,
+          `  ${write(`V="$TOK" yq -i '.apps.amber.env.AMBER_MCP_PEER_TOKEN = strenv(V)' ${q(SECRETS)}`, 'give Amber the token Bloom expects')}`,
+          `  echo " !  Amber reads that on start, so re-run her install too."`,
+          `fi`,
+        ].join('\n')
+      : `echo " !  no domain given, so Amber's peer wiring was left alone."`,
+
+    dry ? '' : `chmod 600 ${q(SECRETS)}`,
+
+    // 7. What a human still has to supply. Never invented: a placeholder in a
+    //    credential field reads as done, and this one comes from a provider.
+    `if [ -z "$(yq -r ${q(`.apps."${app}".env.BLOOM_OPENROUTER_API_KEY // ""`)} ${q(SECRETS)})" ]; then`,
+    `  echo " !  BLOOM_OPENROUTER_API_KEY is still unset. Add it below — no agent can run without it."`,
+    `fi`,
+    `echo " !  Re-run the install for ${app} so the new keys reach its .env file."`,
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
 export const ACTIONS: Record<string, ActionDef> = {
   // --- getting amber-infra onto the box ------------------------------------
 
@@ -476,6 +599,24 @@ export const ACTIONS: Record<string, ActionDef> = {
    * present to this app, and nothing outside the box constrains it. The three
    * discovery keys are deliberately left out — `install.sh` computes them.
    */
+  /**
+   * Declare an app in secrets.yaml.
+   *
+   * **`env_prefix` is not cosmetic and its absence fails silently**, which is why it
+   * is a parameter rather than a constant. Most apps embed only `agent-mcp-py` and
+   * read `AGENT_MCP_*`, so the default is right. An app that embeds `agent-runtime`
+   * as well owns a single prefix of its own and builds both libraries' settings from
+   * it — Amber (`AMBER_MCP`) and Bloom (`BLOOM_MCP`) both do.
+   *
+   * Get it wrong and nothing errors. Those apps' settings classes use
+   * `extra="ignore"`, so keys under the wrong prefix are not a validation failure —
+   * they are simply not read. The app starts, serves, has no bearer keys so its MCP
+   * server is never mounted, has no public URL so it never registers, and the only
+   * symptom is the word "unregistered" in a status report.
+   *
+   * This action used to hardcode `AGENT_MCP_KEYS`, and that is exactly how it went
+   * wrong for Bloom the first time.
+   */
   addApp: {
     label: 'Declare a new app',
     needsSudo: true,
@@ -485,7 +626,8 @@ export const ACTIONS: Record<string, ActionDef> = {
         `  echo "error: ${p.app} is already declared in secrets.yaml."; exit 1;`,
         `fi`,
         `echo " ok  would add apps.${p.app} (domain ${p.domain}, upstream ${p.upstream || '127.0.0.1:8090'}, image ${p.image || '(unset)'})"`,
-        `echo " ok  would generate one AGENT_MCP_KEYS token for it"`,
+        `echo " ok  would set env_prefix to ${envPrefix(p)}"`,
+        `echo " ok  would generate one ${envPrefix(p)}_KEYS token for it"`,
         `if [ -f ${q(`${INFRA_ROOT}/${p.app}/docker-compose.prod.yml`)} ]; then`,
         `  echo " ok  ${INFRA_ROOT}/${p.app}/docker-compose.prod.yml exists in the checkout";`,
         `else`,
@@ -497,13 +639,16 @@ export const ACTIONS: Record<string, ActionDef> = {
         'set -e',
         `cp -a ${q(SECRETS)} ${q(`${SECRETS}.bak`)}`,
         'TOK="$(openssl rand -hex 32)"',
-        `A=${q(p.app)} D=${q(p.domain)} U=${q(p.upstream || '127.0.0.1:8090')} I=${q(p.image)} S=${q(p.server || 'b')} \\`,
+        `A=${q(p.app)} D=${q(p.domain)} U=${q(p.upstream || '127.0.0.1:8090')} I=${q(p.image)} S=${q(p.server || 'b')} P=${q(envPrefix(p))} \\`,
         `  yq -i '.apps[strenv(A)] = {` +
           `"domain": strenv(D), "upstream": strenv(U), "image": strenv(I), ` +
-          `"managed_by": "docker", "server": strenv(S), "env": {}}' ${q(SECRETS)}`,
-        `A=${q(p.app)} V="amber:$TOK" yq -i '.apps[strenv(A)].env.AGENT_MCP_KEYS = strenv(V)' ${q(SECRETS)}`,
+          `"managed_by": "docker", "server": strenv(S), "env_prefix": strenv(P), "env": {}}' ${q(SECRETS)}`,
+        // The key's own name follows the prefix. A BLOOM_MCP app needs
+        // BLOOM_MCP_KEYS; giving it AGENT_MCP_KEYS leaves it with no keys at all.
+        `A=${q(p.app)} K=${q(`${envPrefix(p)}_KEYS`)} V="amber:$TOK" \\`,
+        `  yq -i '.apps[strenv(A)].env[strenv(K)] = strenv(V)' ${q(SECRETS)}`,
         `chmod 600 ${q(SECRETS)}`,
-        `echo " ok  declared apps.${p.app} with a generated AGENT_MCP_KEYS token"`,
+        `echo " ok  declared apps.${p.app} with env_prefix ${envPrefix(p)} and a generated ${envPrefix(p)}_KEYS token"`,
         `echo " !  install.sh also needs ${INFRA_ROOT}/${p.app}/docker-compose.prod.yml committed to amber-infra. Until that exists, installing ${p.app} will stop with 'no compose file'."`,
       ].join('\n'),
   },
@@ -594,6 +739,33 @@ export const ACTIONS: Record<string, ActionDef> = {
   },
 
   // --- apps -----------------------------------------------------------------
+
+  /**
+   * Repair a Bloom stanza written under the wrong env prefix.
+   *
+   * The bug this exists for: Declare used to hardcode `AGENT_MCP_KEYS` and never
+   * wrote `env_prefix`, so a Bloom installed through the GUI got every discovery key
+   * under a prefix it ignores. Bloom's settings use `extra="ignore"`, so nothing
+   * errored — it started, served, mounted no MCP server, never registered, and the
+   * only symptom was the word "unregistered".
+   *
+   * A single action rather than seven trips through the env editor, because it is
+   * one decision ("make this box's Bloom configuration correct") and half of it is
+   * generating secrets, which is not something to do by hand in a text field.
+   *
+   * Idempotent: every step checks before writing, so running it on a healthy stanza
+   * changes nothing and says so. Every generated secret is generated **on the box**
+   * and never passes through argv, this app, or an op log.
+   *
+   * `BLOOM_OPENROUTER_API_KEY` is deliberately not invented — it comes from a
+   * provider, and a placeholder would read as done. It is reported instead.
+   */
+  repairBloom: {
+    label: "Repair Bloom's configuration",
+    needsSudo: true,
+    rehearse: (p) => BLOOM_REPAIR(p, true),
+    build: (p) => BLOOM_REPAIR(p, false),
+  },
 
   install: {
     label: 'Install / reconcile app',

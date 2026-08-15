@@ -48,6 +48,19 @@ export function Catalogue({
   )
 }
 
+/**
+ * Apps whose own prefix is not the default, because they embed `agent-runtime` too
+ * and build both libraries' settings from one prefix.
+ *
+ * A lookup rather than a guess: the alternative is the user typing it from memory,
+ * and the failure mode for typing it wrong is silence. The field stays editable, so
+ * this is a default and not a rule.
+ */
+const KNOWN_PREFIXES: Record<string, string> = {
+  amber: 'AMBER_MCP',
+  bloom: 'BLOOM_MCP',
+}
+
 function Row({
   entry,
   status,
@@ -62,6 +75,11 @@ function Row({
   const primary = status.settings.primaryDomain
   const [domain, setDomain] = useState(primary ? `${entry.name}.${primary}` : '')
   const [server, setServer] = useState(status.serverLabel ?? '')
+  // Visible rather than assumed, because getting it wrong fails *silently*: keys land
+  // under a prefix the app ignores, so it starts, serves, never registers, and the
+  // only symptom is the word "unregistered" here. AGENT_MCP is right for a plain
+  // agent-mcp-py app; one that embeds agent-runtime too owns its own.
+  const [prefix, setPrefix] = useState(KNOWN_PREFIXES[entry.name] ?? 'AGENT_MCP')
   const here = !server || server === status.serverLabel
 
   return (
@@ -76,9 +94,10 @@ function Row({
       <div className="flex flex-wrap items-center gap-2">
         <Field value={domain} onChange={setDomain} placeholder={`${entry.name}.example.com`} />
         <Field value={server} onChange={setServer} placeholder="server label (a / b)" />
+        <Field value={prefix} onChange={setPrefix} placeholder="AGENT_MCP" />
         <SmallButton
           disabled={disabled || !domain.trim()}
-          title="Writes apps.<name> into secrets.yaml and generates its MCP token"
+          title="Writes apps.<name> into secrets.yaml and generates its bearer token"
           onClick={() =>
             run('addApp', `Declare ${entry.name}`, {
               app: entry.name,
@@ -86,12 +105,20 @@ function Row({
               upstream: entry.upstream ?? '',
               image: entry.image ?? '',
               server: server.trim(),
+              envPrefix: prefix.trim(),
             })
           }
         >
           Declare
         </SmallButton>
       </div>
+
+      {prefix.trim().toUpperCase() !== 'AGENT_MCP' && (
+        <p className="text-micro text-muted">
+          Keys will be written as {prefix.trim().toUpperCase()}_*. Use this only for an
+          app that embeds agent-runtime as well and owns a single prefix of its own.
+        </p>
+      )}
 
       {!here && (
         <p className="text-micro text-muted">
