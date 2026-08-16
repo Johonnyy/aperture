@@ -27,6 +27,8 @@ export function SetupChecklist({
   connections,
   onChanged,
   onConnect,
+  oauthErrors,
+  onOpenConnection,
 }: {
   build: Build
   /** The agent's connections, so a step can show what really happened. */
@@ -34,6 +36,10 @@ export function SetupChecklist({
   onChanged: (build: Build) => void
   /** Runs the existing OAuth flow. Owned by the parent, which already has it. */
   onConnect?: (connectionName: string) => void
+  /** Why authorising failed, per connection name — shown beside its own button. */
+  oauthErrors?: Record<string, string>
+  /** Show this connection in the Connections tab, where its client app is set. */
+  onOpenConnection?: (connectionName: string) => void
 }): React.JSX.Element {
   const [busy, setBusy] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -87,6 +93,8 @@ export function SetupChecklist({
             done={done.has(index)}
             busy={busy === index}
             connection={connections.find((c) => c.name === step.connectionName)}
+            oauthError={step.connectionName ? oauthErrors?.[step.connectionName] : undefined}
+            onOpenConnection={onOpenConnection}
             onTick={() => void tick(index)}
             onConnect={onConnect}
           />
@@ -105,6 +113,8 @@ function Step({
   connection,
   onTick,
   onConnect,
+  oauthError,
+  onOpenConnection,
 }: {
   step: SetupStep
   index: number
@@ -113,6 +123,8 @@ function Step({
   connection?: Connection
   onTick: () => void
   onConnect?: (connectionName: string) => void
+  oauthError?: string
+  onOpenConnection?: (connectionName: string) => void
 }): React.JSX.Element {
   return (
     <li
@@ -147,7 +159,30 @@ function Step({
         <SmallButton onClick={onTick} disabled={busy || done}>
           {done ? 'Done' : busy ? '…' : 'Mark done'}
         </SmallButton>
+        {/* Always a next step.
+            Authorising is the one action this app can take for you, and the usual
+            reason it cannot is a connection with no client id and secret — a form in
+            another tab. Offering the route unconditionally (not only on failure)
+            means the step is never a dead end, and it costs one quiet button. */}
+        {step.connectionName && onOpenConnection && (
+          <button
+            type="button"
+            onClick={() => onOpenConnection(step.connectionName as string)}
+            className="text-micro text-muted underline underline-offset-2 hover:text-accent-hi"
+          >
+            Open {step.connectionName} in Connections
+          </button>
+        )}
       </div>
+
+      {/* Beside the button that produced it. This used to be set on the page-level
+          error at the top of the Build tab, which on a finished build is far above
+          the fold — so the button read as dead while the reason sat off-screen. */}
+      {oauthError && (
+        <p className="ml-6 rounded-field border border-danger/40 px-2.5 py-1.5 text-xs text-danger">
+          {oauthError}
+        </p>
+      )}
     </li>
   )
 }

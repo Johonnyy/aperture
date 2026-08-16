@@ -25,9 +25,19 @@ import { TraceView } from './TraceView'
  */
 export function BuildAgent({
   onBuilt,
+  onOpenConnection,
 }: {
   /** Refresh the agent list — a build usually adds one. */
   onBuilt: () => void
+  /**
+   * Show this connection in the Connections tab.
+   *
+   * The checklist can only *start* a consent flow, and the commonest reason that
+   * fails is a connection with no client id and secret yet — which is a form two
+   * tabs away. Without this the step is a dead end: a button that cannot work and
+   * no route to the thing that would make it work.
+   */
+  onOpenConnection?: (connectionName: string) => void
 }): React.JSX.Element {
   const [brief, setBrief] = useState('')
   const [buildId, setBuildId] = useState<string | null>(null)
@@ -36,6 +46,8 @@ export function BuildAgent({
   const [connections, setConnections] = useState<Connection[]>([])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /** Why authorising failed, per connection name. Rendered beside its own button. */
+  const [oauthErrors, setOauthErrors] = useState<Record<string, string>>({})
 
   const run = useStore((s) => (runId ? s.bloomRuns[runId] : undefined))
   const inFlight = runId !== null && !run?.done
@@ -89,11 +101,41 @@ export function BuildAgent({
     if (!result.ok && result.code !== 'conflict') setError(result.error)
   }
 
+  /**
+   * Start the consent flow, and report the failure *where the button is*.
+   *
+   * Both halves of this used to go wrong silently. A name with no matching
+   * connection returned with no message at all, and a real failure from Bloom —
+   * "Spotify has no client credentials" — was written to the page-level `error`,
+   * which renders at the top of this tab inside the "Describe an agent" panel. On a
+   * finished build the checklist is well below the fold, so the button looked dead
+   * while the reason sat off-screen.
+   *
+   * The error is keyed by connection name rather than kept as one string: a build
+   * can list more than one connection to authorise, and a single slot would let the
+   * second one's failure silently replace the first's.
+   */
   const connect = async (connectionName: string): Promise<void> => {
+    const note = (message: string): void =>
+      setOauthErrors((prev) => ({ ...prev, [connectionName]: message }))
+
     const match = connections.find((c) => c.name === connectionName)
-    if (!match) return
+    if (!match) {
+      note(
+        `This build names a connection called "${connectionName}", and Bloom has no ` +
+          'connection by that name. Open the Connections tab to see what it does have.',
+      )
+      return
+    }
     const result = await window.aperture.bloom.startOAuth(match.id)
-    if (!result.ok) setError(result.error)
+    if (result.ok) {
+      setOauthErrors((prev) => {
+        const { [connectionName]: _cleared, ...rest } = prev
+        return rest
+      })
+      return
+    }
+    note(result.error)
   }
 
   // The provider redirects back through Bloom, which fires an `aperture://` deep
@@ -161,7 +203,16 @@ export function BuildAgent({
         {runId && <TraceView runId={runId} />}
       </section>
 
-      {build && <BuildResult build={build} connections={connections} onChanged={setBuild} onConnect={connect} />}
+      {build && (
+        <BuildResult
+          build={build}
+          connections={connections}
+          onChanged={setBuild}
+          onConnect={connect}
+          oauthErrors={oauthErrors}
+          onOpenConnection={onOpenConnection}
+        />
+      )}
     </div>
   )
 }
@@ -172,11 +223,15 @@ function BuildResult({
   connections,
   onChanged,
   onConnect,
+  oauthErrors,
+  onOpenConnection,
 }: {
   build: Build
   connections: Connection[]
   onChanged: (build: Build) => void
   onConnect: (connectionName: string) => void
+  oauthErrors: Record<string, string>
+  onOpenConnection?: (connectionName: string) => void
 }): React.JSX.Element {
   return (
     <section className="flex flex-col gap-3 rounded-panel border border-line bg-raised/50 p-3">
@@ -206,6 +261,8 @@ function BuildResult({
       {build.status !== 'failed' && (
         <SetupChecklist
           build={build}
+          oauthErrors={oauthErrors}
+          onOpenConnection={onOpenConnection}
           connections={connections}
           onChanged={onChanged}
           onConnect={onConnect}

@@ -41,6 +41,18 @@ export function BloomView(): React.JSX.Element {
   const setBloomLink = useStore((s) => s.setBloomLink)
 
   const [tab, setTab] = useState<Tab>('agents')
+  /**
+   * The connection the Connections tab should scroll to, set when the build
+   * checklist sends you there because its Connect button could not do the job.
+   * Cleared on any manual tab change, so it does not persist as a stale highlight.
+   */
+  const [focusConnection, setFocusConnection] = useState<string | null>(null)
+
+  /** Any manual tab change drops the highlight, so it never lingers as stale. */
+  const goTab = (next: Tab): void => {
+    setFocusConnection(null)
+    setTab(next)
+  }
   const [detail, setDetail] = useState<DetailTab>('settings')
   const [agents, setAgents] = useState<AgentConfig[]>([])
   const [editing, setEditing] = useState<AgentConfig | 'new' | null>(null)
@@ -94,19 +106,19 @@ export function BloomView(): React.JSX.Element {
       )}
 
       <div className="flex shrink-0 items-center gap-1 border-b border-line pb-2">
-        <TabButton active={tab === 'agents'} onClick={() => setTab('agents')}>
+        <TabButton active={tab === 'agents'} onClick={() => goTab('agents')}>
           Agents
         </TabButton>
-        <TabButton active={tab === 'build'} onClick={() => setTab('build')}>
+        <TabButton active={tab === 'build'} onClick={() => goTab('build')}>
           Build
         </TabButton>
-        <TabButton active={tab === 'connections'} onClick={() => setTab('connections')}>
+        <TabButton active={tab === 'connections'} onClick={() => goTab('connections')}>
           Connections
         </TabButton>
-        <TabButton active={tab === 'activity'} onClick={() => setTab('activity')}>
+        <TabButton active={tab === 'activity'} onClick={() => goTab('activity')}>
           Activity
         </TabButton>
-        <TabButton active={tab === 'usage'} onClick={() => setTab('usage')}>
+        <TabButton active={tab === 'usage'} onClick={() => goTab('usage')}>
           Usage
         </TabButton>
       </div>
@@ -114,7 +126,15 @@ export function BloomView(): React.JSX.Element {
       {/* Its own tab rather than a button on the agent list: a build is a run
           that takes minutes and produces a checklist to work through, which is a
           place you stay rather than a dialog you dismiss. */}
-      {tab === 'build' && <BuildAgent onBuilt={() => void refresh()} />}
+      {tab === 'build' && (
+        <BuildAgent
+          onBuilt={() => void refresh()}
+          onOpenConnection={(name) => {
+            setFocusConnection(name)
+            setTab('connections')
+          }}
+        />
+      )}
 
       {tab === 'agents' &&
         (editing ? (
@@ -175,7 +195,7 @@ export function BloomView(): React.JSX.Element {
           />
         ))}
 
-      {tab === 'connections' && <ConnectionLibrary />}
+      {tab === 'connections' && <ConnectionLibrary focus={focusConnection} />}
       {tab === 'activity' && <RunHistory />}
       {tab === 'usage' && <Usage />}
     </section>

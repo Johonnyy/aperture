@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { Connection } from '../../shared/bloom'
 import { Chip, Field, SmallButton } from '../infra/parts'
@@ -17,7 +17,19 @@ import { Chip, Field, SmallButton } from '../infra/parts'
  * at, so Bloom refuses with a 409 naming them and that refusal is rendered as a
  * confirmation rather than an error.
  */
-export function ConnectionLibrary(): React.JSX.Element {
+export function ConnectionLibrary({
+  focus,
+}: {
+  /**
+   * A connection name to scroll to and mark, arriving from the build checklist.
+   *
+   * The checklist can start a consent flow and nothing else, so when that fails for
+   * want of a client id and secret it sends you here. Landing on an unhighlighted
+   * list of every connection this Bloom holds would make you find the row again,
+   * which is the same dead end one step further along.
+   */
+  focus?: string | null
+} = {}): React.JSX.Element {
   const [connections, setConnections] = useState<Connection[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -25,6 +37,15 @@ export function ConnectionLibrary(): React.JSX.Element {
   const [probe, setProbe] = useState<Record<string, string>>({})
   const [rotating, setRotating] = useState<string | null>(null)
   const [newSecret, setNewSecret] = useState('')
+  const focusRef = useRef<HTMLLIElement | null>(null)
+
+  // After the list has rendered, not on mount: `connections` arrives from a fetch, so
+  // on mount there is no row to scroll to yet.
+  useEffect(() => {
+    if (focus && focusRef.current) {
+      focusRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }
+  }, [focus, connections])
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -116,7 +137,11 @@ export function ConnectionLibrary(): React.JSX.Element {
         {connections.map((connection) => (
           <li
             key={connection.id}
-            className="flex flex-col gap-2 rounded-field border border-line bg-ground p-2.5"
+            ref={connection.name === focus ? focusRef : undefined}
+            className={[
+              'flex flex-col gap-2 rounded-field border bg-ground p-2.5',
+              connection.name === focus ? 'border-accent-deep' : 'border-line',
+            ].join(' ')}
           >
             <div className="flex flex-wrap items-center gap-2">
               <div className="min-w-0 flex-1">
