@@ -7,6 +7,7 @@ import type {
   BuildStarted,
   Connection,
   ConnectionKinds,
+  ConnectionSecretInput,
   OAuthStart,
   ProbeResult,
   RunSummary,
@@ -422,7 +423,7 @@ export async function deleteConnection(
 export async function setConnectionSecret(
   target: BloomTarget,
   connectionId: string,
-  body: { secret?: string; client_secret?: string },
+  body: ConnectionSecretInput,
 ): Promise<BloomResult<Connection | null>> {
   const result = await request<unknown>(
     target,

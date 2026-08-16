@@ -1,7 +1,14 @@
 import { create } from 'zustand'
 
 import { EMPTY_BLOOM_LINK, type BloomLink, type BloomRunEvent } from '../shared/bloom'
-import type { ModelFrame, ServerFrame, VoiceFrame } from '../shared/protocol'
+import type {
+  ActivityOrigin,
+  MemoryFact,
+  ModelFrame,
+  ServerFrame,
+  StatusFrame,
+  VoiceFrame,
+} from '../shared/protocol'
 import type {
   ApertureEvent,
   AuditEntry,
@@ -22,10 +29,102 @@ import { DEFAULT_SETTINGS } from '../shared/types'
 export interface Message {
   id: string
   role: 'user' | 'amber'
+  /**
+   * Sentences, joined with a space, from `audio_chunk`.
+   *
+   * This is the *speech* view of the reply and it is lossy on purpose — the splitter
+   * upstream deals in sentences, so the model's newlines never reach it. Kept as the
+   * fallback for an Amber that predates `delta`.
+   */
   text: string
+  /**
+   * The same reply with the model's own whitespace intact, from `delta`.
+   *
+   * Preferred for rendering whenever it is non-empty: it is the only one of the two
+   * that can carry a heading, a list or a code fence.
+   */
+  raw: string
   ts: number
-  /** True while sentences are still arriving for this reply. */
+  /** True while the reply is still arriving. */
   streaming?: boolean
+  /** The turn was cut short — this is as much as was said. */
+  interrupted?: boolean
+}
+
+/**
+ * One tool call Amber made, from the `activity` frame.
+ *
+ * `running` starts true and is cleared by the matching `end`. A call still running
+ * when `turn_complete` lands was interrupted: Amber sends no closing frame on the
+ * cancellation path (the socket may be gone, and it is on the barge-in latency
+ * path), so the client settles it from what it already knows — it sent the
+ * `interrupt` itself.
+ */
+export interface Activity {
+  id: string
+  name: string
+  origin: ActivityOrigin
+  input?: Record<string, unknown>
+  readOnly?: boolean
+  result?: string
+  ok?: boolean
+  ms?: number
+  ts: number
+  running: boolean
+  interrupted?: boolean
+  /**
+   * A Bloom run this call started, once main has matched one to it.
+   *
+   * How a build kicked off by voice becomes watchable without leaving the chat: the
+   * card grows the same live run timeline the Bloom tab draws.
+   */
+  runId?: string
+}
+
+/**
+ * The chat, as one ordered list.
+ *
+ * Messages and tool calls share an array rather than living in two, because their
+ * *interleaving* is the information — "she said this, then looked that up, then said
+ * this" is the thing a transcript of either half alone cannot express.
+ */
+/** What one turn cost. From the additive fields on `turn_complete`. */
+export interface TurnStats {
+  steps: number
+  tokens_in: number
+  tokens_out: number
+  cost_usd: number
+  model: string
+}
+
+export type TimelineItem =
+  | ({ kind: 'message' } & Message)
+  | ({ kind: 'activity' } & Activity)
+
+/** The most recent message, skipping any tool calls that landed after it. */
+export function lastMessage(timeline: TimelineItem[]): Message | null {
+  for (let i = timeline.length - 1; i >= 0; i--) {
+    const item = timeline[i]
+    if (item.kind === 'message') return item
+  }
+  return null
+}
+
+/** The reply still being streamed, if there is one. */
+function streamingReply(timeline: TimelineItem[]): Message | null {
+  const last = lastMessage(timeline)
+  return last?.role === 'amber' && last.streaming ? last : null
+}
+
+/** Replace one item in place, keeping order. */
+function patch(
+  timeline: TimelineItem[],
+  id: string,
+  change: Partial<Message> & Partial<Activity>,
+): TimelineItem[] {
+  return timeline.map((item) =>
+    item.id === id ? ({ ...item, ...change } as TimelineItem) : item,
+  )
 }
 
 /**
@@ -51,8 +150,26 @@ export interface BloomRun {
 interface State {
   connection: ConnectionStatus
   settings: Settings
-  messages: Message[]
+  /** Messages and tool calls, in the order they happened. */
+  timeline: TimelineItem[]
   memoryItems: string[]
+  /** The same facts with their tier, confidence and usage — from a `turn` frame. */
+  memoryFacts: MemoryFact[]
+  /** Everything Amber knows, from a `browse`. Kept apart from what is in use now. */
+  memoryBrowse: MemoryFact[]
+  /** Active facts in total, so a browse can say what it is a slice of. */
+  memoryTotal: number | null
+  /** The outcome of the last forget/restore/correct, for an undo affordance. */
+  memoryAck: { action: string; id: number; ok: boolean; content?: string } | null
+  /** What this Amber can reach and which halves of it are on. Null before handshake. */
+  status: StatusFrame | null
+  /**
+   * What each completed turn cost, oldest first.
+   *
+   * Only present on an Amber that reports it — which, until the run state stopped
+   * being discarded, was none of them.
+   */
+  turnStats: TurnStats[]
   trace: TraceEntry[]
   audit: AuditEntry[]
   pendingApprovals: PendingApproval[]
@@ -112,6 +229,8 @@ interface State {
 }
 
 const TRACE_CAP = 400
+// Enough for a long session's chart without letting it grow forever.
+const TURN_STATS_CAP = 200
 
 let seq = 0
 const nextId = (): string => `${Date.now()}-${++seq}`
@@ -127,7 +246,13 @@ function trace(
 export const useStore = create<State>((set) => ({
   connection: { state: 'idle', sessionId: null, resumed: false },
   settings: DEFAULT_SETTINGS,
-  messages: [],
+  timeline: [],
+  memoryFacts: [],
+  memoryBrowse: [],
+  memoryTotal: null,
+  memoryAck: null,
+  status: null,
+  turnStats: [],
   memoryItems: [],
   trace: [],
   audit: [],
@@ -223,15 +348,26 @@ export const useStore = create<State>((set) => ({
 
   addUserMessage: (text) =>
     set((s) => ({
-      messages: [
-        ...s.messages,
-        { id: nextId(), role: 'user', text, ts: Date.now() },
+      timeline: [
+        ...s.timeline,
+        {
+          kind: 'message',
+          id: nextId(),
+          role: 'user',
+          text,
+          raw: text,
+          ts: Date.now(),
+        },
       ],
     })),
 
   ingest: (event) =>
     set((s) => {
       switch (event.kind) {
+        case 'activity-run':
+          // The card grows a live build timeline. Nothing else about it changes.
+          return { timeline: patch(s.timeline, event.callId, { runId: event.runId }) }
+
         case 'connection': {
           const was = s.connection.state
           const now = event.status.state
@@ -282,7 +418,7 @@ export const useStore = create<State>((set) => ({
 /**
  * One Bloom run event: into its own bucket, and — sparsely — into the shared trace.
  *
- * **Both, from one reducer**, exactly as `reduceFrame` returns `{ messages, trace }`.
+ * **Both, from one reducer**, exactly as `reduceFrame` returns `{ timeline, trace }`.
  * Emitting a second event from main to narrate would double the traffic and put the
  * mapping in the wrong process.
  *
@@ -367,19 +503,32 @@ function reduceFrame(s: State, frame: ServerFrame): Partial<State> {
         ),
       }
 
-    case 'transcript':
+    case 'transcript': {
       // Amber echoes the transcript for typed turns too, and we already rendered
       // those optimistically — so only add one when it's something we didn't send.
-      if (s.messages.at(-1)?.role === 'user' && s.messages.at(-1)?.text === frame.text) {
+      //
+      // Against the *last message*, not the last timeline item: a tool call from the
+      // previous turn can sit between, and comparing against that would defeat the
+      // dedupe and double every typed turn.
+      const previous = lastMessage(s.timeline)
+      if (previous?.role === 'user' && previous.text === frame.text) {
         return { trace: push(trace('info', 'transcript', frame.text)) }
       }
       return {
-        messages: [
-          ...s.messages,
-          { id: nextId(), role: 'user', text: frame.text, ts: Date.now() },
+        timeline: [
+          ...s.timeline,
+          {
+            kind: 'message',
+            id: nextId(),
+            role: 'user',
+            text: frame.text,
+            raw: frame.text,
+            ts: Date.now(),
+          },
         ],
         trace: push(trace('info', 'transcript', frame.text)),
       }
+    }
 
     case 'thinking':
       return {
@@ -387,32 +536,87 @@ function reduceFrame(s: State, frame: ServerFrame): Partial<State> {
         trace: push(trace('info', `thinking: ${frame.active}`)),
       }
 
-    case 'audio_chunk': {
-      // Each sentence appends to the in-flight reply, so the bubble grows as Amber
-      // speaks rather than appearing all at once at the end.
-      const last = s.messages.at(-1)
-      const messages =
-        last?.role === 'amber' && last.streaming
-          ? s.messages.map((m) =>
-              m.id === last.id ? { ...m, text: `${m.text} ${frame.text}`.trim() } : m,
-            )
+    case 'delta': {
+      // The reply's text view. Appended verbatim — no trimming, no joining — because
+      // the whitespace *is* what this frame exists to preserve.
+      const open = streamingReply(s.timeline)
+      return {
+        timeline: open
+          ? patch(s.timeline, open.id, { raw: open.raw + frame.text })
           : [
-              ...s.messages,
+              ...s.timeline,
               {
+                kind: 'message',
                 id: nextId(),
-                role: 'amber' as const,
-                text: frame.text,
+                role: 'amber',
+                text: '',
+                raw: frame.text,
                 ts: Date.now(),
                 streaming: true,
               },
-            ]
-      return { messages, trace: push(trace('info', `sentence ${frame.index}`, frame.text)) }
+            ],
+        // Deliberately no trace line. One per token would bury everything else in
+        // the column within a sentence.
+      }
+    }
+
+    case 'audio_chunk': {
+      // Sentences still accumulate, as the fallback for an Amber with no `delta`
+      // frame. When deltas *are* arriving this is the spoken-progress marker and the
+      // renderer ignores `text` entirely.
+      const open = streamingReply(s.timeline)
+      return {
+        timeline: open
+          ? patch(s.timeline, open.id, {
+              text: `${open.text} ${frame.text}`.trim(),
+            })
+          : [
+              ...s.timeline,
+              {
+                kind: 'message',
+                id: nextId(),
+                role: 'amber',
+                text: frame.text,
+                raw: '',
+                ts: Date.now(),
+                streaming: true,
+              },
+            ],
+        trace: push(trace('info', `sentence ${frame.index}`, frame.text)),
+      }
     }
 
     case 'turn_complete':
       return {
         awaitingResponse: frame.awaiting_response === true,
-        messages: s.messages.map((m) => (m.streaming ? { ...m, streaming: false } : m)),
+        // Absent on the canned path and on any install with cost tracking off, so
+        // this stays a list of turns that actually reported rather than a list with
+        // zeroes in it.
+        turnStats:
+          frame.cost_usd === undefined
+            ? s.turnStats
+            : [
+                ...s.turnStats,
+                {
+                  steps: frame.steps ?? 0,
+                  tokens_in: frame.tokens_in ?? 0,
+                  tokens_out: frame.tokens_out ?? 0,
+                  cost_usd: frame.cost_usd,
+                  model: frame.model ?? '',
+                },
+              ].slice(-TURN_STATS_CAP),
+        // Settle everything the turn left open. A tool call still running here was
+        // interrupted — Amber sends no closing frame on the cancellation path, so
+        // this is where the client applies what it already knows.
+        timeline: s.timeline.map((item) => {
+          if (item.kind === 'message' && item.streaming) {
+            return { ...item, streaming: false }
+          }
+          if (item.kind === 'activity' && item.running) {
+            return { ...item, running: false, interrupted: true }
+          }
+          return item
+        }),
         trace: push(
           trace(
             'info',
@@ -422,11 +626,69 @@ function reduceFrame(s: State, frame: ServerFrame): Partial<State> {
         ),
       }
 
-    case 'memory':
+    case 'activity': {
+      if (frame.phase === 'start') {
+        return {
+          timeline: [
+            ...s.timeline,
+            {
+              kind: 'activity',
+              id: frame.id,
+              name: frame.name,
+              origin: frame.origin,
+              input: frame.input,
+              readOnly: frame.read_only,
+              ts: Date.now(),
+              running: true,
+            },
+          ],
+          trace: push(
+            trace('info', `${frame.name}…`, JSON.stringify(frame.input ?? {})),
+          ),
+        }
+      }
+      return {
+        timeline: patch(s.timeline, frame.id, {
+          running: false,
+          ok: frame.ok,
+          ms: frame.ms,
+          result: frame.result,
+        }),
+        trace: push(
+          trace(
+            frame.ok === false ? 'error' : 'info',
+            `${frame.name} ${frame.ok === false ? 'failed' : 'ok'}`,
+            frame.ms === undefined ? undefined : `${frame.ms}ms`,
+          ),
+        ),
+      }
+    }
+
+    case 'memory': {
+      // Two questions through one frame. A browse must never overwrite what the
+      // turn is drawing on, or the panel loses the highlighting that says which
+      // facts are actually in play right now.
+      if (frame.scope === 'browse') {
+        return {
+          memoryBrowse: frame.facts ?? [],
+          memoryTotal: frame.total ?? null,
+          memoryAck: frame.ack ?? null,
+          trace: push(trace('info', `memory browse (${frame.facts?.length ?? 0})`)),
+        }
+      }
       return {
         memoryItems: frame.items,
-        trace: push(trace('info', `memory (${frame.items.length})`, frame.items.join(' · '))),
+        memoryFacts: frame.facts ?? [],
+        trace: push(
+          trace('info', `memory (${frame.items.length})`, frame.items.join(' · ')),
+        ),
       }
+    }
+
+    case 'status':
+      // Whole-record, never a delta — a dropped frame cannot leave a panel showing
+      // a peer as reachable long after it stopped being.
+      return { status: frame, trace: push(trace('info', 'status')) }
 
     case 'tool_call':
       return {

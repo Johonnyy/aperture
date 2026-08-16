@@ -1,7 +1,7 @@
 import { BrowserWindow, ipcMain, nativeTheme } from 'electron'
 import { randomUUID } from 'node:crypto'
 
-import type { AgentConfigInput, BloomLink } from '../shared/bloom'
+import type { AgentConfigInput, BloomLink, ConnectionSecretInput } from '../shared/bloom'
 import type { CatalogueModel } from '../shared/models'
 import type { ReleaseInfo } from '../shared/version'
 import { IPC } from '../shared/ipc'
@@ -101,6 +101,25 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
       // down is the honest answer — there is nowhere else to put it.
       return remapKeyword(amber, keyword.trim().toLowerCase(), target)
     },
+  )
+
+  // Curating memory from the UI. Like the keyword map above, there is no optimistic
+  // local copy: Amber owns the facts and answers with a `memory` frame carrying what
+  // actually took effect, so the panel renders the reply rather than its own guess.
+  ipcMain.handle(
+    IPC.AMBER_MEMORY_ACTION,
+    (
+      _e,
+      action: 'forget' | 'restore' | 'correct',
+      id: number,
+      content?: string,
+    ): boolean => amber.send({ type: 'memory_action', action, id, content }),
+  )
+
+  ipcMain.handle(
+    IPC.AMBER_MEMORY_QUERY,
+    (_e, q: string | null, limit?: number): boolean =>
+      amber.send({ type: 'memory_query', q, limit }),
   )
 
   ipcMain.handle(
@@ -448,7 +467,7 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
   )
   ipcMain.handle(
     IPC.BLOOM_CONNECTION_SECRET,
-    (_e, id: string, body: { secret?: string; client_secret?: string }) =>
+    (_e, id: string, body: ConnectionSecretInput) =>
       bloomApi.setConnectionSecret(emit, id, body),
   )
   ipcMain.handle(IPC.BLOOM_CONNECTION_REVOKE, (_e, id: string) =>

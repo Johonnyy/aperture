@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { Connection } from '../../shared/bloom'
-import { Chip, Field, SmallButton } from '../infra/parts'
+import type { Connection, ConnectionKinds } from '../../shared/bloom'
+import { Chip, SmallButton } from '../infra/parts'
+import { ConnectionCredentials, credentialsLabel } from './ConnectionCredentials'
 
 /**
  * Every connection this Bloom holds, across all agents.
@@ -31,36 +32,67 @@ export function ConnectionLibrary({
   focus?: string | null
 } = {}): React.JSX.Element {
   const [connections, setConnections] = useState<Connection[]>([])
+  const [kinds, setKinds] = useState<ConnectionKinds | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string | null>(null)
   const [probe, setProbe] = useState<Record<string, string>>({})
-  const [rotating, setRotating] = useState<string | null>(null)
-  const [newSecret, setNewSecret] = useState('')
+  const [editing, setEditing] = useState<string | null>(null)
   const focusRef = useRef<HTMLLIElement | null>(null)
+
+  /**
+   * The focus we have already acted on.
+   *
+   * Opening the form is a one-shot per arrival, not a property of the render: every
+   * refresh re-runs the effect below, and without this a form the user closed would
+   * spring back open the moment anything reloaded the list.
+   */
+  const openedFor = useRef<string | null>(null)
 
   // After the list has rendered, not on mount: `connections` arrives from a fetch, so
   // on mount there is no row to scroll to yet.
   useEffect(() => {
-    if (focus && focusRef.current) {
-      focusRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    if (!focus) return
+    if (focusRef.current) focusRef.current.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    if (openedFor.current === focus) return
+    // You are only ever sent here because something needs filling in — the build
+    // checklist's Connect could not run for want of a client id and secret. Landing
+    // on the right row with the form still shut is the same dead end one step along.
+    const match = connections.find((c) => c.name === focus)
+    if (match) {
+      openedFor.current = focus
+      setEditing(match.id)
     }
   }, [focus, connections])
 
   const refresh = useCallback(async () => {
     setLoading(true)
-    const result = await window.aperture.bloom.connections()
+    const [result, k] = await Promise.all([
+      window.aperture.bloom.connections(),
+      window.aperture.bloom.connectionKinds(),
+    ])
     if (result.ok) {
       setConnections(result.value)
       setError(null)
     } else {
       setError(result.error)
     }
+    // A failed kinds call is survivable: it only costs the credentials form its
+    // provider hints, so it must not blank the list or report an error over one.
+    if (k.ok) setKinds(k.value)
     setLoading(false)
   }, [])
 
   useEffect(() => {
     void refresh()
+  }, [refresh])
+
+  // This list can start a browser flow now, so it has to re-read when one finishes.
+  // The event says only that *something* completed; the answer comes from Bloom.
+  useEffect(() => {
+    return window.aperture.amber.onEvent((event) => {
+      if (event.kind === 'bloom-oauth') void refresh()
+    })
   }, [refresh])
 
   const test = async (connection: Connection): Promise<void> => {
@@ -98,16 +130,12 @@ export function ConnectionLibrary({
     else await refresh()
   }
 
-  const rotate = async (connection: Connection): Promise<void> => {
+  /** Authorise, for a connection that now has an app registration to do it with. */
+  const connect = async (connection: Connection): Promise<void> => {
     setBusy(connection.id)
-    const body =
-      connection.kind === 'api_key' ? { secret: newSecret } : { client_secret: newSecret }
-    const result = await window.aperture.bloom.setConnectionSecret(connection.id, body)
+    const result = await window.aperture.bloom.startOAuth(connection.id)
     setBusy(null)
-    setNewSecret('')
-    setRotating(null)
     if (!result.ok) setError(result.error)
-    else await refresh()
   }
 
   return (
@@ -176,18 +204,21 @@ export function ConnectionLibrary({
                 <SmallButton disabled={busy === connection.id} onClick={() => void test(connection)}>
                   {busy === connection.id ? '…' : 'Test'}
                 </SmallButton>
-                {connection.kind !== 'oauth' && (
+                {/* One button for every kind, and shown whether or not something is
+                    already stored. It used to be two, each hidden until a secret
+                    existed — so the connection that most needed it, one Bloom built
+                    for you and nobody has filled in, offered nothing at all. */}
+                <SmallButton
+                  onClick={() => setEditing((e) => (e === connection.id ? null : connection.id))}
+                >
+                  {editing === connection.id ? 'Close' : credentialsLabel(connection)}
+                </SmallButton>
+                {connection.kind === 'oauth' && (
                   <SmallButton
-                    onClick={() => setRotating((r) => (r === connection.id ? null : connection.id))}
+                    disabled={busy === connection.id}
+                    onClick={() => void connect(connection)}
                   >
-                    {connection.hasSecret ? 'Rotate' : 'Set key'}
-                  </SmallButton>
-                )}
-                {connection.kind === 'oauth' && connection.hasClientSecret && (
-                  <SmallButton
-                    onClick={() => setRotating((r) => (r === connection.id ? null : connection.id))}
-                  >
-                    Rotate app secret
+                    {connection.status === 'active' ? 'Reconnect' : 'Connect'}
                   </SmallButton>
                 )}
                 <SmallButton danger onClick={() => void remove(connection)}>
@@ -196,24 +227,19 @@ export function ConnectionLibrary({
               </div>
             </div>
 
-            {rotating === connection.id && (
-              <div className="flex flex-wrap items-center gap-2 pl-1">
-                <Field
-                  value={newSecret}
-                  onChange={setNewSecret}
-                  type="password"
-                  placeholder={connection.kind === 'api_key' ? 'new key' : 'new client secret'}
-                  onEnter={() => void rotate(connection)}
-                />
-                <SmallButton primary disabled={!newSecret} onClick={() => void rotate(connection)}>
-                  Save
-                </SmallButton>
-                <span className="text-micro text-muted">
-                  {connection.kind === 'oauth'
-                    ? 'Rotating the app secret leaves the approved account alone.'
-                    : 'Replaces the stored key. Nothing is ever shown back.'}
-                </span>
-              </div>
+            {editing === connection.id && (
+              <ConnectionCredentials
+                connection={connection}
+                provider={kinds?.providers.find((p) => p.name === connection.provider)}
+                publicUrl={kinds?.publicUrl}
+                onSaved={refresh}
+                onError={setError}
+                onConnect={
+                  connection.kind === 'oauth' && connection.status !== 'active'
+                    ? () => connect(connection)
+                    : undefined
+                }
+              />
             )}
           </li>
         ))}

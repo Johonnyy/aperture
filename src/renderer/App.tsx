@@ -59,7 +59,9 @@ export function App(): React.JSX.Element {
           {view === 'keys' && <KeysView />}
           {view === 'settings' && <SettingsView />}
 
-          <StatusPanel />
+          {/* Global on purpose: a build kicked off by voice must stay visible while
+              you are in Settings. Sections narrow themselves per view instead. */}
+          <StatusPanel view={view} />
         </main>
       </div>
     </div>

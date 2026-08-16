@@ -317,6 +317,33 @@ export interface ConnectionDraft {
   attachTo?: string[]
 }
 
+/**
+ * What `setConnectionSecret` takes — Bloom's spelling, because it is a wire body.
+ *
+ * `clientId` is not a secret and lives in `config`, but it travels with the secret
+ * because Bloom refuses to mix a connection's id with the environment's secret: an
+ * app registration is one intent, not two fields. Omitted means *leave alone*;
+ * `client_id: ''` clears it, which is how a connection returns to this deployment's
+ * default. An empty *secret* is refused by Bloom rather than stored.
+ */
+export interface ConnectionSecretInput {
+  secret?: string
+  client_id?: string
+  client_secret?: string
+}
+
+/**
+ * The app registration this connection is bound to, or '' for the box's default.
+ *
+ * A helper rather than a field on `Connection`: it is genuinely a member of the
+ * open-ended `config` bag Bloom returns, and promoting it to a column here would
+ * invent a shape the wire does not have.
+ */
+export function clientIdOf(connection: Connection): string {
+  const value = connection.config.client_id
+  return typeof value === 'string' ? value : ''
+}
+
 export interface ProviderInfo {
   name: string
   displayName: string
@@ -332,6 +359,19 @@ export interface ProviderInfo {
    * and those win. This only says whether the form can prefill instead of asking.
    */
   hasDeploymentDefault: boolean
+  /**
+   * The callback address to register with this provider, or '' when there is none.
+   *
+   * Not derivable here, and it must never be guessed: providers compare it exactly,
+   * at both the authorize step and the token exchange, so a URL assembled from a
+   * remembered route shape is the classic silent `invalid_grant`. Bloom hosts the
+   * callback because it has a public origin and a desktop app does not.
+   *
+   * Empty means either that this provider has no browser flow, or that the
+   * deployment has no `BLOOM_PUBLIC_URL` — `ConnectionKinds.publicUrl` is what
+   * tells the two apart, and only the second is a problem to report.
+   */
+  redirectUri: string
   /** Names, never values. They are public — committed in the provider's manifest. */
   clientIdEnv: string
   clientSecretEnv: string
@@ -355,6 +395,15 @@ export interface ConnectionKinds {
   providers: ProviderInfo[]
   /** Peers the sync store knows about, to prefill a URL. Never used at run time. */
   discoveredPeers: { name: string; baseUrl: string }[]
+  /**
+   * Bloom's own public origin — the one every callback address is built from.
+   *
+   * Empty means this deployment has none configured, which is why no provider has a
+   * `redirectUri`. Worth reporting as its own sentence: without it no OAuth flow can
+   * start at all, and the symptom otherwise appears one screen later as a provider
+   * with a blank field for no visible reason.
+   */
+  publicUrl: string
 }
 
 /** What a test told us, and — importantly — which test it was. */

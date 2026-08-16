@@ -18,10 +18,13 @@ export function AgentSetup({
   agent,
   connections,
   onConnect,
+  onEditCredentials,
 }: {
   agent: AgentConfig
   connections: Connection[]
   onConnect?: (connectionName: string) => void
+  /** Opens the credentials form on that connection, in the list right below. */
+  onEditCredentials?: (connectionName: string) => void
 }): React.JSX.Element | null {
   const [build, setBuild] = useState<Build | null>(null)
 
@@ -58,6 +61,7 @@ export function AgentSetup({
         connections={connections}
         onChanged={setBuild}
         onConnect={onConnect}
+        onEditCredentials={onEditCredentials}
       />
     </section>
   )

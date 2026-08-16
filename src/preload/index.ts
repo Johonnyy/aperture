@@ -10,6 +10,7 @@ import type {
   Connection,
   ConnectionDraft,
   ConnectionKinds,
+  ConnectionSecretInput,
   ProbeResult,
   RunSummary,
   RunTrace,
@@ -82,6 +83,21 @@ const api = {
     sendAudio: (buffer: ArrayBuffer): Promise<boolean> =>
       ipcRenderer.invoke(IPC.AMBER_SEND_AUDIO, buffer),
     interrupt: (): Promise<boolean> => ipcRenderer.invoke(IPC.AMBER_INTERRUPT),
+    /**
+     * Forget, restore or correct one remembered fact.
+     *
+     * Deletion is soft on Amber's side, which is what makes `restore` a real undo
+     * rather than a button that lies. The answer arrives as a `memory` frame.
+     */
+    memoryAction: (
+      action: 'forget' | 'restore' | 'correct',
+      id: number,
+      content?: string,
+    ): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.AMBER_MEMORY_ACTION, action, id, content),
+    /** Browse or search everything Amber remembers, not just this turn's facts. */
+    memoryQuery: (q: string | null, limit?: number): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.AMBER_MEMORY_QUERY, q, limit),
     /**
      * Point a model keyword at a model — `null` resets it to Amber's default.
      *
@@ -331,10 +347,16 @@ const api = {
     /** 409s when agents still use it, naming them, unless `force`. */
     deleteConnection: (id: string, force?: boolean): Promise<BloomCall<void>> =>
       ipcRenderer.invoke(IPC.BLOOM_CONNECTION_DELETE, id, force === true),
-    /** Paste or rotate a secret. Never a patch — a secret must not ride an edit. */
+    /**
+     * Paste or rotate a credential. Never a patch — a secret must not ride an edit.
+     *
+     * Also the only way to give an existing connection an app registration, which is
+     * what a connection Bloom created for you (every one the builder makes) needs
+     * before its browser flow can even start.
+     */
     setConnectionSecret: (
       id: string,
-      body: { secret?: string; client_secret?: string },
+      body: ConnectionSecretInput,
     ): Promise<BloomCall<Connection | null>> =>
       ipcRenderer.invoke(IPC.BLOOM_CONNECTION_SECRET, id, body),
     revokeConnection: (id: string): Promise<BloomCall<Connection | null>> =>

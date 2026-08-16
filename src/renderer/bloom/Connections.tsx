@@ -8,9 +8,11 @@ import {
   type ConnectionDraft,
   type ConnectionKind,
   type ConnectionKinds,
+  type ProviderInfo,
 } from '../../shared/bloom'
 import { Chip, Field, SmallButton } from '../infra/parts'
 import { AgentSetup } from './AgentSetup'
+import { ConnectionCredentials, credentialsLabel, RedirectUri } from './ConnectionCredentials'
 
 /**
  * What an agent can act through.
@@ -43,6 +45,14 @@ export function Connections({ agent }: { agent: AgentConfig }): React.JSX.Elemen
   const [picking, setPicking] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [probe, setProbe] = useState<Record<string, string>>({})
+  /**
+   * Which connection has its credentials form open, by id.
+   *
+   * Inline and one at a time, matching the house rule that every "add X" expands in
+   * place rather than opening a modal. The checklist writes to this too, which is
+   * what turns "use the connection's panel below" into a control that actually opens.
+   */
+  const [editing, setEditing] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -134,6 +144,10 @@ export function Connections({ agent }: { agent: AgentConfig }): React.JSX.Elemen
           const match = attached.find((c) => c.name === name)
           if (match) void connect(match)
         }}
+        onEditCredentials={(name) => {
+          const match = attached.find((c) => c.name === name)
+          if (match) setEditing(match.id)
+        }}
       />
 
       <div className="flex flex-wrap items-center gap-2">
@@ -207,38 +221,68 @@ export function Connections({ agent }: { agent: AgentConfig }): React.JSX.Elemen
         {attached.map((connection) => (
           <li
             key={connection.id}
-            className="flex flex-wrap items-center gap-2 rounded-field border border-line bg-ground p-2.5"
+            className="flex flex-col gap-2 rounded-field border border-line bg-ground p-2.5"
           >
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-body text-ink">{connection.label || connection.name}</span>
-                <Chip tone={statusTone(connection)}>{connection.status}</Chip>
-                <Chip tone="muted">{connection.kind}</Chip>
-                {connection.agentIds.length > 1 && (
-                  <Chip tone="muted">
-                    shared with {connection.agentIds.length - 1} other
-                    {connection.agentIds.length === 2 ? '' : 's'}
-                  </Chip>
-                )}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-body text-ink">{connection.label || connection.name}</span>
+                  <Chip tone={statusTone(connection)}>{connection.status}</Chip>
+                  <Chip tone="muted">{connection.kind}</Chip>
+                  {connection.agentIds.length > 1 && (
+                    <Chip tone="muted">
+                      shared with {connection.agentIds.length - 1} other
+                      {connection.agentIds.length === 2 ? '' : 's'}
+                    </Chip>
+                  )}
+                </div>
+                <p className="mt-1 truncate font-mono text-micro text-muted">
+                  {probe[connection.id] ??
+                    summarise(
+                      connection,
+                      kinds?.providers.find((p) => p.name === connection.provider),
+                    )}
+                </p>
               </div>
-              <p className="mt-1 truncate font-mono text-micro text-muted">
-                {probe[connection.id] ?? summarise(connection)}
-              </p>
+
+              <div className="flex shrink-0 gap-1.5">
+                <SmallButton disabled={busy === connection.id} onClick={() => void test(connection)}>
+                  {busy === connection.id ? '…' : 'Test'}
+                </SmallButton>
+                {/* Unconditional, for every kind. It used to appear only once a
+                    secret was already stored, which hid it in the one case that
+                    needed it — a connection Bloom made for you and nobody has
+                    filled in yet. */}
+                <SmallButton
+                  onClick={() => setEditing((e) => (e === connection.id ? null : connection.id))}
+                >
+                  {editing === connection.id ? 'Close' : credentialsLabel(connection)}
+                </SmallButton>
+                {connection.kind === 'oauth' && (
+                  <SmallButton disabled={busy === connection.id} onClick={() => void connect(connection)}>
+                    {connection.status === 'active' ? 'Reconnect' : 'Connect'}
+                  </SmallButton>
+                )}
+                <SmallButton danger onClick={() => void detach(connection)}>
+                  Remove
+                </SmallButton>
+              </div>
             </div>
 
-            <div className="flex shrink-0 gap-1.5">
-              <SmallButton disabled={busy === connection.id} onClick={() => void test(connection)}>
-                {busy === connection.id ? '…' : 'Test'}
-              </SmallButton>
-              {connection.kind === 'oauth' && (
-                <SmallButton disabled={busy === connection.id} onClick={() => void connect(connection)}>
-                  {connection.status === 'active' ? 'Reconnect' : 'Connect'}
-                </SmallButton>
-              )}
-              <SmallButton danger onClick={() => void detach(connection)}>
-                Remove
-              </SmallButton>
-            </div>
+            {editing === connection.id && (
+              <ConnectionCredentials
+                connection={connection}
+                provider={kinds?.providers.find((p) => p.name === connection.provider)}
+                publicUrl={kinds?.publicUrl}
+                onSaved={refresh}
+                onError={setError}
+                onConnect={
+                  connection.kind === 'oauth' && connection.status !== 'active'
+                    ? () => connect(connection)
+                    : undefined
+                }
+              />
+            )}
           </li>
         ))}
       </ul>
@@ -257,12 +301,20 @@ function statusTone(connection: Connection): 'ok' | 'warn' | 'muted' {
   return 'warn'
 }
 
-/** One line saying what this gives the agent, without ever showing a secret. */
-function summarise(connection: Connection): string {
+/**
+ * One line saying what this gives the agent, without ever showing a secret.
+ *
+ * The OAuth case distinguishes the two reasons it is not live, because they need
+ * opposite actions from you. "Press Connect" is right only when there is an app
+ * registration to connect *with*; without one, Bloom refuses to even start the flow,
+ * and pressing Connect produces an error where a sentence would have done.
+ */
+function summarise(connection: Connection, provider?: ProviderInfo): string {
   if (connection.status === 'pending') {
-    return connection.kind === 'oauth'
+    if (connection.kind !== 'oauth') return 'No key stored yet.'
+    return connection.hasClientSecret || provider?.hasDeploymentDefault !== false
       ? 'Not approved yet — press Connect.'
-      : 'No key stored yet.'
+      : 'Needs a client id and secret — press Set app.'
   }
   const url = typeof connection.config.url === 'string' ? connection.config.url : ''
   if (connection.kind === 'mcp') return url
@@ -442,6 +494,9 @@ function AddConnection({
                     chosen.displayName +
                     ' and paste its credentials. They are stored encrypted, on the connection.'}
               </p>
+              {/* Before the credential boxes, because registering the app asks for
+                  this first and the boxes below are what registering produces. */}
+              <RedirectUri uri={chosen.redirectUri} publicUrl={kinds.publicUrl} />
               <Row label="Client ID" hint="From the app you registered with the provider.">
                 <Field value={clientId} onChange={setClientId} placeholder="client id" />
               </Row>

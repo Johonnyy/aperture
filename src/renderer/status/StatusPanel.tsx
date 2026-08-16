@@ -1,281 +1,262 @@
-import { useEffect, useRef, useState } from 'react'
+import * as Accordion from '@radix-ui/react-accordion'
+import { ChevronRight } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
-import type { ConnState, PendingApproval } from '../../shared/types'
+import { cn } from '../cn'
 import { useStore } from '../store'
+import { Dot, Ring } from '../viz/primitives'
+import { ApprovalCard } from './ApprovalCard'
+import { MemoryPanel } from './MemoryPanel'
+import { RunningPanel } from './RunningPanel'
+import { SpendPanel } from './SpendPanel'
+import { SystemPanel } from './SystemPanel'
+import { WireLog } from './WireLog'
 
-const STATE_STYLE: Record<ConnState, { dot: string; label: string }> = {
-  idle: { dot: 'bg-muted', label: 'Disconnected' },
-  connecting: { dot: 'bg-accent animate-pulse-dot', label: 'Connecting' },
-  open: { dot: 'bg-ok', label: 'Connected' },
-  reconnecting: { dot: 'bg-accent animate-pulse-dot', label: 'Reconnecting' },
-  error: { dot: 'bg-danger', label: 'Error' },
-}
+/**
+ * The right-hand panel: an instrument stack, not a log.
+ *
+ * It used to be a four-hundred-line monospace trace with one entry per frame, which
+ * meant `sentence 0`, `sentence 1`, `thinking: true` drowned everything that
+ * mattered. The information a person actually wants from it — is the socket up, what
+ * is running, what does Amber think she knows about me, what is this costing — was
+ * either buried in that column or not on the wire at all.
+ *
+ * **Sections declare their own relevance.** The panel renders on every view, so a
+ * build kicked off by voice stays visible while you are in Settings; but Memory and
+ * Spend are about a conversation, and on the Servers tab they collapse to a summary
+ * rather than sitting open and empty. The trace survives as the bottom section,
+ * collapsed, filterable — useful when something is wrong and out of the way when it
+ * is not.
+ */
 
-/** These two are the user's problem to fix; `internal` is Amber's. */
-const ACTIONABLE = new Set(['rate_limited', 'session_limit', 'payload_too_large'])
+const WIDTH_KEY = 'aperture.status.width'
+const OPEN_KEY = 'aperture.status.open'
+const MIN_WIDTH = 300
+const MAX_WIDTH = 720
+const DEFAULT_WIDTH = 380
 
-export function StatusPanel(): React.JSX.Element {
+export function StatusPanel({ view }: { view: string }): React.JSX.Element {
   const connection = useStore((s) => s.connection)
-  const trace = useStore((s) => s.trace)
-  const memoryItems = useStore((s) => s.memoryItems)
   const lastError = useStore((s) => s.lastError)
   const clearError = useStore((s) => s.clearError)
-  const pending = useStore((s) => s.pendingApprovals)
-  const audit = useStore((s) => s.audit)
+  const approvals = useStore((s) => s.pendingApprovals)
+  const [width, setWidth] = useState(() => readWidth())
+  const [open, setOpen] = useState<string[]>(() => readOpen())
 
-  const traceEndRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    traceEndRef.current?.scrollIntoView({ block: 'end' })
-  }, [trace])
+  const onWidth = useCallback((next: number) => {
+    const clamped = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, next))
+    setWidth(clamped)
+    localStorage.setItem(WIDTH_KEY, String(clamped))
+  }, [])
 
-  const style = STATE_STYLE[connection.state]
+  const onOpen = useCallback((next: string[]) => {
+    setOpen(next)
+    localStorage.setItem(OPEN_KEY, JSON.stringify(next))
+  }, [])
+
+  const chatty = view === 'chat'
 
   return (
-    <aside className="flex w-[380px] shrink-0 flex-col border-l border-line bg-raised/40">
-      {/* --- connection --- */}
-      <div className="border-b border-line px-4 py-3">
-        <div className="flex items-center gap-2">
-          <span className={`h-2 w-2 rounded-full ${style.dot}`} />
-          <span className="text-sm font-medium">{style.label}</span>
-          {connection.resumed && (
-            <span className="rounded border border-line px-1.5 py-0.5 text-micro text-muted">
-              resumed
-            </span>
-          )}
-        </div>
+    <aside
+      style={{ width }}
+      className="relative flex shrink-0 flex-col border-l border-line bg-raised/40"
+    >
+      <Grip onWidth={onWidth} />
 
-        {connection.sessionId && (
-          <p className="mt-1.5 truncate font-mono text-meta text-muted">
-            session {connection.sessionId}
-          </p>
-        )}
-        {connection.detail && (
-          <p className="mt-1 text-meta text-muted">{connection.detail}</p>
-        )}
-        {connection.state === 'reconnecting' && connection.retryInMs && (
-          <p className="mt-1 text-meta text-accent">
-            retrying in {Math.round(connection.retryInMs / 1000)}s (attempt{' '}
-            {connection.attempt})
-          </p>
-        )}
-      </div>
+      <Summary connection={connection} />
 
       {lastError && (
-        <div
-          className={`flex items-start gap-2 border-b border-line px-4 py-2.5 text-xs ${
-            lastError.code && ACTIONABLE.has(lastError.code) ? 'text-accent' : 'text-danger'
-          }`}
-        >
-          <div className="flex-1">
-            {lastError.code && <span className="font-mono">[{lastError.code}] </span>}
+        <div className="mx-3 mb-2 flex items-start gap-2 rounded-field border border-danger/50 px-2 py-1.5">
+          <p className="min-w-0 flex-1 text-xs break-words text-danger">
             {lastError.message}
-          </div>
-          <button type="button" onClick={clearError} className="text-muted hover:text-ink">
-            ✕
+          </p>
+          <button
+            type="button"
+            onClick={clearError}
+            className="shrink-0 text-nano text-muted uppercase hover:text-ink"
+          >
+            dismiss
           </button>
         </div>
       )}
 
-      {/* --- approvals: the one thing here that's blocking a turn --- */}
-      {pending.map((approval) => (
-        <ApprovalCard key={approval.id} approval={approval} />
+      {/* Outside the accordion on purpose: it blocks, and a blocking thing must not
+          be collapsible. */}
+      {approvals.map((approval) => (
+        <div key={approval.id} className="px-3 pb-2">
+          <ApprovalCard approval={approval} />
+        </div>
       ))}
 
-      {/* --- memory --- */}
-      {memoryItems.length > 0 && (
-        <div className="border-b border-line px-4 py-3">
-          <h2 className="mb-2 text-meta font-semibold tracking-wide text-muted uppercase">
-            Drawing on
-          </h2>
-          <ul className="flex flex-col gap-1">
-            {memoryItems.map((item, i) => (
-              <li key={i} className="text-xs leading-snug text-ink/80">
-                · {item}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <Accordion.Root
+        type="multiple"
+        value={open}
+        onValueChange={onOpen}
+        className="min-h-0 flex-1 overflow-y-auto px-3 pb-3"
+      >
+        <Section id="running" label="Running">
+          <RunningPanel />
+        </Section>
 
-      {/* --- an in-flight Bloom run --- */}
-      <BloomRunCard />
+        <Section id="memory" label="Memory" muted={!chatty}>
+          {chatty ? <MemoryPanel /> : <MemorySummary />}
+        </Section>
 
-      {/* --- live trace --- */}
-      <div className="flex min-h-0 flex-1 flex-col">
-        <h2 className="px-4 pt-3 pb-2 text-meta font-semibold tracking-wide text-muted uppercase">
-          Live trace
-        </h2>
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-3">
-          {trace.length === 0 ? (
-            <p className="text-xs text-muted">
-              Activity appears here as Amber and her backends work.
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-1 font-mono text-meta">
-              {trace.map((entry) => (
-                <li key={entry.id} className="leading-snug">
-                  <span className="text-muted">
-                    {new Date(entry.ts).toLocaleTimeString(undefined, { hour12: false })}{' '}
-                  </span>
-                  <span
-                    className={
-                      entry.level === 'error'
-                        ? 'text-danger'
-                        : entry.level === 'warn'
-                          ? 'text-accent'
-                          : 'text-ink/80'
-                    }
-                  >
-                    {entry.label}
-                  </span>
-                  {entry.detail && (
-                    <span className="block pl-4 break-words text-muted">{entry.detail}</span>
-                  )}
-                </li>
-              ))}
-              <div ref={traceEndRef} />
-            </ul>
-          )}
-        </div>
-      </div>
+        <Section id="system" label="System">
+          <SystemPanel />
+        </Section>
 
-      <p className="border-t border-line px-4 py-2 text-micro leading-snug text-muted">
-        Shows frames Amber sends over the wire, and Bloom runs as they happen. Her
-        own server-side tool calls run inside the agent loop and aren&apos;t visible
-        here.
-      </p>
+        <Section id="spend" label="Spend" muted={!chatty}>
+          <SpendPanel />
+        </Section>
 
-      {/* --- audit log --- */}
-      {audit.length > 0 && (
-        <details className="border-t border-line">
-          <summary className="px-4 py-2 text-meta font-semibold tracking-wide text-muted uppercase">
-            Command log ({audit.length})
-          </summary>
-          <ul className="max-h-64 overflow-y-auto px-4 pb-3">
-            {audit.map((entry) => (
-              <li key={`${entry.id}-${entry.ts}`} className="border-b border-line/50 py-1.5">
-                <div className="flex items-baseline gap-2 text-meta">
-                  <span className={OUTCOME_STYLE[entry.outcome]}>{entry.outcome}</span>
-                  <span className="text-muted">{entry.server}</span>
-                  <span className="ml-auto text-muted">
-                    {new Date(entry.ts).toLocaleTimeString(undefined, { hour12: false })}
-                  </span>
-                </div>
-                <p className="font-mono text-meta break-words text-ink/80">
-                  {entry.command}
-                </p>
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
+        <Section id="wire" label="Wire log">
+          <WireLog />
+        </Section>
+      </Accordion.Root>
     </aside>
   )
 }
 
-const OUTCOME_STYLE: Record<string, string> = {
-  approved: 'text-ok',
-  auto: 'text-ok',
-  denied: 'text-muted',
-  timeout: 'text-accent',
-  error: 'text-danger',
+/** Always visible, whatever is collapsed: the three things worth a glance. */
+function Summary({
+  connection,
+}: {
+  connection: ReturnType<typeof useStore.getState>['connection']
+}): React.JSX.Element {
+  const runs = useStore((s) => s.bloomRuns)
+  const spend = useStore((s) =>
+    s.turnStats.reduce((sum, t) => sum + t.cost_usd, 0),
+  )
+  const live = Object.values(runs).filter((r) => !r.done).length
+
+  const STATE = {
+    idle: { tone: 'muted', label: 'idle' },
+    connecting: { tone: 'warn', label: 'connecting' },
+    open: { tone: 'ok', label: 'connected' },
+    reconnecting: { tone: 'warn', label: 'reconnecting' },
+    error: { tone: 'danger', label: 'error' },
+  } as const
+  const state = STATE[connection.state] ?? STATE.idle
+
+  return (
+    <div className="flex items-center gap-2 px-3 py-2.5">
+      {connection.retryInMs ? (
+        // A countdown is a cycle, not a load — so an arc rather than a bar.
+        <span className="text-warn">
+          <Ring value={1 - Math.min(1, connection.retryInMs / 30_000)} />
+        </span>
+      ) : (
+        <Dot tone={state.tone} pulse={connection.state === 'connecting'} />
+      )}
+      <span className="text-meta text-ink">{state.label}</span>
+      {connection.sessionId && (
+        <span className="min-w-0 flex-1 truncate font-mono text-nano text-muted">
+          {connection.sessionId}
+        </span>
+      )}
+      <span className={cn('flex-1', connection.sessionId && 'hidden')} />
+      {live > 0 && (
+        <span className="shrink-0 text-nano text-accent-hi uppercase">
+          {live} running
+        </span>
+      )}
+      {spend > 0 && (
+        <span className="shrink-0 font-mono text-nano text-muted tabular-nums">
+          ${spend.toFixed(3)}
+        </span>
+      )}
+    </div>
+  )
 }
 
-/**
- * A command Amber wants to run, waiting on you.
- *
- * The countdown is not decoration: past the deadline the bridge answers Amber
- * itself, so the window to act is real and worth showing.
- */
-function ApprovalCard({ approval }: { approval: PendingApproval }): React.JSX.Element {
-  const [remaining, setRemaining] = useState(() =>
-    Math.max(0, approval.expiresAt - Date.now()),
+function MemorySummary(): React.JSX.Element {
+  const count = useStore((s) => s.status?.memory?.facts ?? null)
+  return (
+    <p className="text-meta text-muted">
+      {count === null
+        ? 'Open the Amber tab to manage memory.'
+        : `${count} fact${count === 1 ? '' : 's'} remembered.`}
+    </p>
   )
+}
+
+function Section({
+  id,
+  label,
+  children,
+  muted,
+}: {
+  id: string
+  label: string
+  children: React.ReactNode
+  muted?: boolean
+}): React.JSX.Element {
+  return (
+    <Accordion.Item value={id} className="border-0 border-b border-line last:border-0">
+      <Accordion.Header>
+        <Accordion.Trigger className="group flex w-full items-center gap-2 py-2 text-left">
+          <ChevronRight className="size-3 text-muted transition-transform group-data-[state=open]:rotate-90" />
+          <span
+            className={cn(
+              'text-nano tracking-wide uppercase',
+              muted ? 'text-muted' : 'text-ink/70',
+            )}
+          >
+            {label}
+          </span>
+        </Accordion.Trigger>
+      </Accordion.Header>
+      <Accordion.Content className="pb-3">{children}</Accordion.Content>
+    </Accordion.Item>
+  )
+}
+
+/** Drag the panel wider. Pointer capture, so it survives leaving the 4px strip. */
+function Grip({ onWidth }: { onWidth: (next: number) => void }): React.JSX.Element {
+  const dragging = useRef(false)
 
   useEffect(() => {
-    const timer = setInterval(
-      () => setRemaining(Math.max(0, approval.expiresAt - Date.now())),
-      250,
-    )
-    return () => clearInterval(timer)
-  }, [approval.expiresAt])
+    const move = (e: PointerEvent): void => {
+      if (dragging.current) onWidth(window.innerWidth - e.clientX)
+    }
+    const up = (): void => {
+      dragging.current = false
+      document.body.style.cursor = ''
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    return () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+  }, [onWidth])
 
   return (
-    <div className="border-b border-accent/40 bg-accent/10 px-4 py-3">
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-medium text-accent-hi">Amber wants to run</span>
-        <span className="ml-auto font-mono text-meta text-accent">
-          {Math.ceil(remaining / 1000)}s
-        </span>
-      </div>
-      <p className="mt-1 text-meta text-muted">on {approval.server}</p>
-      <pre className="mt-1.5 overflow-x-auto rounded-control bg-ground px-2 py-1.5 font-mono text-meta whitespace-pre-wrap text-ink">
-        {approval.command}
-      </pre>
-      <div className="mt-2 flex gap-2">
-        <button
-          type="button"
-          onClick={() => void window.aperture.bridge.approve(approval.id)}
-          className="rounded-control border border-ok/50 bg-ok/10 px-3 py-1 text-meta text-ok transition hover:bg-ok/20"
-        >
-          Approve
-        </button>
-        <button
-          type="button"
-          onClick={() => void window.aperture.bridge.deny(approval.id)}
-          className="rounded-control border border-line px-3 py-1 text-meta text-muted transition hover:border-danger/50 hover:text-danger"
-        >
-          Deny
-        </button>
-      </div>
-    </div>
+    <div
+      onPointerDown={() => {
+        dragging.current = true
+        document.body.style.cursor = 'col-resize'
+      }}
+      className="absolute top-0 bottom-0 -left-1 z-10 w-2 cursor-col-resize"
+      aria-hidden
+    />
   )
 }
 
-/**
- * A Bloom run in flight, watchable from any tab.
- *
- * The run keeps going whether or not the Bloom tab is open — the stream lives in
- * main — so this is the one place that says so while you are somewhere else, and
- * the one place you can stop it from.
- *
- * Only the newest unfinished run: several can be in flight, but a column this narrow
- * showing three at once would be a list nobody reads. The Bloom tab has the rest.
- */
-function BloomRunCard(): React.JSX.Element | null {
-  const runs = useStore((s) => s.bloomRuns)
+function readWidth(): number {
+  const raw = Number(localStorage.getItem(WIDTH_KEY))
+  return Number.isFinite(raw) && raw >= MIN_WIDTH && raw <= MAX_WIDTH
+    ? raw
+    : DEFAULT_WIDTH
+}
 
-  const entries = Object.entries(runs).filter(([, run]) => !run.done)
-  const newest = entries.at(-1)
-  if (!newest) return null
-
-  const [runId, run] = newest
-  const started = run.events.find((e) => e.kind === 'run_started')
-  const agent = String(started?.payload.agent_slug ?? 'an agent')
-  const lastTool = [...run.events].reverse().find((e) => e.kind === 'tool_started')
-  const lastText = [...run.events].reverse().find((e) => e.kind === 'text')
-
-  return (
-    <div className="border-b border-line px-4 py-3">
-      <h2 className="mb-2 text-meta font-semibold tracking-wide text-muted uppercase">
-        Bloom is working
-      </h2>
-      <div className="rounded-field border border-accent/40 bg-accent/10 px-3 py-2">
-        <div className="flex items-center gap-2">
-          <span className="h-2 w-2 shrink-0 animate-pulse-dot rounded-full bg-accent" />
-          <span className="min-w-0 flex-1 truncate font-mono text-meta text-ink">{agent}</span>
-          <button
-            type="button"
-            onClick={() => void window.aperture.bloom.cancelRun(runId)}
-            className="rounded-control border border-line px-2 py-0.5 text-micro text-muted transition hover:border-danger/50 hover:text-danger"
-          >
-            Stop
-          </button>
-        </div>
-        <p className="mt-1 line-clamp-2 text-xs text-muted">
-          {lastTool ? `${lastTool.toolName ?? 'running a tool'}…` : String(lastText?.payload.text ?? 'thinking…')}
-        </p>
-      </div>
-    </div>
-  )
+function readOpen(): string[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(OPEN_KEY) ?? '')
+    if (Array.isArray(raw)) return raw.filter((v) => typeof v === 'string')
+  } catch {
+    // First run, or someone edited localStorage. Fall through to the default.
+  }
+  return ['running', 'memory']
 }

@@ -54,6 +54,15 @@ export type ApertureEvent =
    */
   | { kind: 'bloom-run'; runId: string; event: BloomRunEvent }
   /**
+   * A tool call Amber made turned out to have started a Bloom run.
+   *
+   * Amber cannot say this herself: `bloom__build_agent` blocks for the whole build
+   * and only returns the run id at the end — by which time the interesting part is
+   * over. So main matches the two after the fact (see `main/bloom/attach.ts`) and
+   * this is how the pairing reaches the card, which then grows a live timeline.
+   */
+  | { kind: 'activity-run'; callId: string; runId: string }
+  /**
    * A browser finished an OAuth flow and handed control back via `aperture://`.
    *
    * Carries only which provider it was, and even that is a hint: the URL is
@@ -91,6 +100,15 @@ export interface TraceEntry {
   level: 'info' | 'warn' | 'error'
   label: string
   detail?: string
+  /**
+   * Who produced this line, so the log can be filtered.
+   *
+   * The column deliberately stays *one* interleaved list — Amber is what kicks off a
+   * Bloom run, and two columns would put cause and effect side by side. But until now
+   * a Bloom line was identifiable only by the `bloom: ` prefix baked into its label,
+   * which is a string to grep rather than a field to filter on.
+   */
+  source?: 'amber' | 'bloom' | 'bridge' | 'app'
 }
 
 // --- ssh --------------------------------------------------------------------

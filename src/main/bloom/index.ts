@@ -8,6 +8,7 @@ import type {
   Build,
   Connection,
   ConnectionKinds,
+  ConnectionSecretInput,
   ProbeResult,
   RunSummary,
   RunTrace,
@@ -178,7 +179,7 @@ export const deleteConnection = (
 export const setConnectionSecret = (
   emit: Emit,
   connectionId: string,
-  body: { secret?: string; client_secret?: string },
+  body: ConnectionSecretInput,
 ): Promise<Result<Connection | null>> =>
   call(emit, (t) => api.setConnectionSecret(t, connectionId, body))
 

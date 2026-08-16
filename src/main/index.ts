@@ -7,6 +7,7 @@ import { AmberConnection } from './amber/connection'
 import { ToolBridge } from './amber/tool-bridge'
 import { applyModel } from './amber/model'
 import { applyVoice } from './amber/voice'
+import { attachPeerRun, resetAttachments } from './bloom/attach'
 import { verifyLink } from './bloom/link'
 import { hold as holdDeepLink, parseDeepLink } from './bloom/deep-link'
 import { closeAllRunStreams } from './bloom/run-stream'
@@ -97,13 +98,26 @@ function buildConnection(): AmberConnection {
       applyModel(connection, getSettings())
     } else if (frame.type === 'tool_call') {
       void bridge?.handleToolCall(frame)
+    } else if (
+      frame.type === 'activity' &&
+      frame.phase === 'start' &&
+      frame.origin === 'peer:bloom'
+    ) {
+      // Amber can't tell us the run id — `build_agent` blocks for the whole build
+      // and only returns it at the end — so go and find it. See bloom/attach.ts.
+      attachPeerRun(emit, frame.id, Date.now())
     }
   })
 
   connection.on('status', (status) => {
     emit({ kind: 'connection', status })
     // The socket is gone; nobody will read a tool_result, so stop waiting on humans.
-    if (status.state !== 'open') bridge?.abortAll()
+    if (status.state !== 'open') {
+      bridge?.abortAll()
+      // Call ids are per-connection, so a resumed session must not inherit the
+      // "already matched" set from the one before it.
+      resetAttachments()
+    }
   })
   connection.on('audio', (buffer: Buffer, meta) => {
     // Copy out of the pooled Buffer before it crosses the boundary — Node reuses

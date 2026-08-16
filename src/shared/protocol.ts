@@ -78,12 +78,101 @@ export interface TurnCompleteFrame {
   type: 'turn_complete'
   sentences: number
   awaiting_response?: true
+  /**
+   * What the turn cost. Attached together or not at all — absent on the canned
+   * reprompt path and on any install with cost tracking off.
+   *
+   * These are newly *reportable* rather than newly measured: `AgentRunner.stream`
+   * always built them and always discarded them, so an Amber older than that fix
+   * sends none of these keys and its spend genuinely is unknown.
+   */
+  steps?: number
+  tokens_in?: number
+  tokens_out?: number
+  cost_usd?: number
+  /** The model that actually answered — the keyword table can move between turns. */
+  model?: string
 }
 
-/** The facts Amber is drawing on this turn. Advisory — it never affects the loop. */
+/** One remembered fact, as much of it as rides on the wire. */
+export interface MemoryFact {
+  id: number
+  content: string
+  /** How settled Amber considers it. `durable` is identity-level knowledge. */
+  tier: 'session' | 'short' | 'durable'
+  category?: string | null
+  /** 0..1. How sure she is it is true. */
+  confidence?: number
+  /** How many turns have actually drawn on it — whether it has earned its keep. */
+  use_count?: number
+  last_used_at?: string | null
+  /**
+   * `explicit` was told to her outright ("remember that…"); `extracted` was inferred
+   * from something said in passing; `consolidated` was merged by the maintenance
+   * pass. Worth showing — the three deserve different confidence from a reader.
+   */
+  source?: 'extracted' | 'explicit' | 'consolidated'
+}
+
+/**
+ * What Amber remembers. Advisory — it never affects the loop.
+ *
+ * One shape, two questions, told apart by `scope`. Unprompted before a reply it is
+ * `turn`: the facts *this* turn is drawing on. In answer to a `memory_query` it is
+ * `browse`: everything she knows. A panel must not let the second overwrite the
+ * first, or the highlighting of what is in use right now is lost.
+ */
 export interface MemoryFrame {
   type: 'memory'
   items: string[]
+  /** Absent on an Amber that predates the richer records. */
+  facts?: MemoryFact[]
+  /** Absent means `turn` — the original meaning, unchanged. */
+  scope?: 'turn' | 'browse'
+  /** Active facts in total, so a browse can say what it is a slice of. */
+  total?: number
+  /** Settles a `memory_action`. Present even when it was refused. */
+  ack?: { action: string; id: number; ok: boolean; content?: string }
+}
+
+/**
+ * What this install can reach, and which of its optional halves are switched on.
+ *
+ * Sent after `model` on the handshake. Everything in it always existed inside Amber
+ * and was simply never told to anyone, so a client had to infer a peer's existence
+ * from a tool name it happened to watch go past — and could not distinguish "no
+ * peers configured" from "the sync store is down" at all.
+ *
+ * Every section is optional: they are gathered independently server-side and one
+ * that fails is omitted rather than failing the frame.
+ */
+export interface StatusFrame {
+  type: 'status'
+  session?: {
+    id: string
+    turns: number
+    max_turns: number
+    /** Messages the brain is carrying — what silently grows until replies cost more. */
+    history: number
+    client_tools: string[]
+  }
+  limits?: { turns: number; window_s: number }
+  peers?: {
+    enabled: boolean
+    last_ok?: string | null
+    last_error?: string | null
+    discovered?: number
+    /** Never carries a credential — Amber projects these field by field. */
+    known: { name: string; base_url?: string; version?: string; tools?: number }[]
+  }
+  sync?: {
+    enabled: boolean
+    last_ok?: string | null
+    last_error?: string | null
+    pending?: number
+  }
+  memory?: { facts?: number }
+  features?: Record<string, boolean>
 }
 
 /**
@@ -218,6 +307,81 @@ export interface ModelFrame {
   locked?: true
 }
 
+/** Which of Amber's four brokers served a tool call. */
+export type ActivityOrigin =
+  /** Amber's own in-process tools. */
+  | 'own'
+  /** A tool *this device* declared with `register_tools`. */
+  | 'client'
+  /** `expect_reply` — a back-channel flag, not work. */
+  | 'signal'
+  /** A peer MCP server, e.g. `peer:bloom`. */
+  | `peer:${string}`
+
+/**
+ * One tool call, reported as it starts and again as it finishes.
+ *
+ * **Not `tool_call`.** That frame is a *request* — Amber asking this client to run
+ * one of its own tools, and blocking until a `tool_result` comes back. This one is a
+ * *report* about work Amber is doing herself, and nothing is owed in reply. The two
+ * would be easy to merge and the UI would then look like it had an unanswered
+ * obligation on every web search.
+ *
+ * Render on `start` and patch on `end`, correlating by `id` — do not wait for a
+ * completed pair. A peer call may legitimately run for minutes, so waiting would
+ * hide exactly the calls worth watching for exactly as long as they were
+ * interesting.
+ *
+ * **An interrupted call never gets its `end`.** Amber deliberately emits nothing on
+ * the cancellation path: it also runs when the connection is closing, so the socket
+ * may already be gone, and it sits between the user interrupting and Amber listening
+ * again. Treat a call still open at `turn_complete` as interrupted — this client is
+ * the one that sent the `interrupt`, so it already knows.
+ */
+export interface ActivityFrame {
+  type: 'activity'
+  /** Correlates the `start` with its `end`. */
+  id: string
+  phase: 'start' | 'end'
+  /** The name the model called, prefixed by convention — see `ActivityOrigin`. */
+  name: string
+  origin: ActivityOrigin
+  /** Arguments, each string value clamped for display. `start` only. */
+  input?: Record<string, unknown>
+  /** Whether the tool only reads. Absent when Amber didn't say. `start` only. */
+  read_only?: boolean
+  /** The result, clamped to a preview. The model got the whole thing. `end` only. */
+  result?: string
+  /** Amber's own heuristic (the result didn't start with "Error"). `end` only. */
+  ok?: boolean
+  /** Wall-clock duration in ms. `end` only. */
+  ms?: number
+}
+
+/**
+ * Raw reply text as the model produced it, before the sentence splitter.
+ *
+ * The text peer of `audio_chunk`. Sentences are the *speech* view of a reply and
+ * arrive whole, so concatenating them means guessing the whitespace between —
+ * newlines, headings, lists and fences are gone by the time they'd reach the DOM.
+ * This is the same reply with the model's own whitespace intact, and it is what
+ * makes rendering markdown possible.
+ *
+ * **Render one or the other, never both.** Prefer deltas when any arrive; fall back
+ * to joining `audio_chunk.text` otherwise, which is what keeps this additive against
+ * an Amber that predates it.
+ *
+ * Two notes on pacing, because the obvious assumption is wrong. Synthesis applies
+ * backpressure all the way up the stream, so text does *not* race ahead of speech —
+ * it leads by about one sentence and then waits. And on a barge-in the last
+ * sentence's text is on the wire while its audio never was, so anything past the
+ * final `audio_chunk` is written-but-unspoken.
+ */
+export interface DeltaFrame {
+  type: 'delta'
+  text: string
+}
+
 /** Something went wrong this turn. The connection stays open. */
 export interface ErrorFrame {
   type: 'error'
@@ -233,6 +397,9 @@ export type ServerFrame =
   | TurnCompleteFrame
   | MemoryFrame
   | ToolCallFrame
+  | ActivityFrame
+  | DeltaFrame
+  | StatusFrame
   | VoiceFrame
   | ModelFrame
   | ErrorFrame
@@ -302,6 +469,33 @@ export type ClientFrame =
       keyword?: string | null
       map?: Record<string, string | null>
     }
+  /**
+   * Curate one remembered fact.
+   *
+   * Lands on the same store functions Amber's own `forget_fact` / `correct_fact`
+   * tools call, so a fact forgotten by asking and one forgotten by clicking end up
+   * as the same row in the same state. Deletion is **soft** server-side, which is
+   * what makes `restore` a real undo rather than a button that lies.
+   *
+   * `correct` supersedes rather than overwrites: the old row survives, marked and
+   * pointing at its replacement. Answered with a `memory` frame carrying `ack` —
+   * including on refusal, so a panel is never left guessing whether a click landed.
+   */
+  | {
+      type: 'memory_action'
+      action: 'forget' | 'restore' | 'correct'
+      id: number
+      /** Required for `correct`, ignored otherwise. */
+      content?: string
+    }
+  /**
+   * Browse or search everything Amber remembers.
+   *
+   * Distinct from the per-turn `memory` frame, which is only what *this* turn drew
+   * on. Without this a fact could only be deleted on a turn that happened to
+   * retrieve it. Answered with a `memory` frame carrying `scope: 'browse'`.
+   */
+  | { type: 'memory_query'; q?: string | null; limit?: number }
 
 // --- narrowing helpers ------------------------------------------------------
 
@@ -313,6 +507,9 @@ const SERVER_FRAME_TYPES = new Set<ServerFrame['type']>([
   'turn_complete',
   'memory',
   'tool_call',
+  'activity',
+  'delta',
+  'status',
   'voice',
   'model',
   'error',

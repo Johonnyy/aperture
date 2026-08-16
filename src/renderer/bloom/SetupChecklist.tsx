@@ -29,6 +29,7 @@ export function SetupChecklist({
   onConnect,
   oauthErrors,
   onOpenConnection,
+  onEditCredentials,
 }: {
   build: Build
   /** The agent's connections, so a step can show what really happened. */
@@ -40,6 +41,15 @@ export function SetupChecklist({
   oauthErrors?: Record<string, string>
   /** Show this connection in the Connections tab, where its client app is set. */
   onOpenConnection?: (connectionName: string) => void
+  /**
+   * Open the credentials form on that connection, when the list is on this page.
+   *
+   * Given, a `set_client_credentials` or `paste_api_key` step becomes the control
+   * that completes it, like `connect_oauth` already was. Absent — on the Build tab,
+   * where the connection list is a tab away — the step keeps its prose and the
+   * "Open in Connections" link is the route.
+   */
+  onEditCredentials?: (connectionName: string) => void
 }): React.JSX.Element {
   const [busy, setBusy] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -97,6 +107,7 @@ export function SetupChecklist({
             onOpenConnection={onOpenConnection}
             onTick={() => void tick(index)}
             onConnect={onConnect}
+            onEditCredentials={onEditCredentials}
           />
         ))}
       </ol>
@@ -115,6 +126,7 @@ function Step({
   onConnect,
   oauthError,
   onOpenConnection,
+  onEditCredentials,
 }: {
   step: SetupStep
   index: number
@@ -125,6 +137,7 @@ function Step({
   onConnect?: (connectionName: string) => void
   oauthError?: string
   onOpenConnection?: (connectionName: string) => void
+  onEditCredentials?: (connectionName: string) => void
 }): React.JSX.Element {
   return (
     <li
@@ -155,7 +168,12 @@ function Step({
       </div>
 
       <div className="flex flex-wrap items-center gap-2 pl-6">
-        <Action step={step} connection={connection} onConnect={onConnect} />
+        <Action
+          step={step}
+          connection={connection}
+          onConnect={onConnect}
+          onEditCredentials={onEditCredentials}
+        />
         <SmallButton onClick={onTick} disabled={busy || done}>
           {done ? 'Done' : busy ? '…' : 'Mark done'}
         </SmallButton>
@@ -190,20 +208,45 @@ function Step({
 /**
  * The affordance for one kind of step.
  *
- * Only `connect_oauth` has a real in-app action, because it is the only step this
- * app can perform on the user's behalf. The rest either open a page in the system
- * browser or point at where to go — and saying "open the Connections panel below"
- * is more honest than a button that scrolls somewhere and does nothing else.
+ * Two kinds now have a real in-app action. `connect_oauth` runs the browser flow;
+ * `set_client_credentials` and `paste_api_key` open the form that stores what the
+ * flow needs — which used to be prose pointing at a panel that had no such control,
+ * so the only real route was an environment variable on the box. Registering the
+ * app at the provider is still yours: that is a person at a developer portal, which
+ * is what `step.url` opens.
  */
 function Action({
   step,
   connection,
   onConnect,
+  onEditCredentials,
 }: {
   step: SetupStep
   connection?: Connection
   onConnect?: (connectionName: string) => void
+  onEditCredentials?: (connectionName: string) => void
 }): React.JSX.Element | null {
+  const needsCredentials =
+    step.kind === 'set_client_credentials' || step.kind === 'paste_api_key'
+
+  // Before the `step.url` branch, and *beside* it rather than instead of it: one of
+  // these steps usually carries a developer portal URL, and the page is where you
+  // obtain the credential while the button is where you put it. Either alone leaves
+  // half the step undone.
+  if (needsCredentials && step.connectionName && onEditCredentials) {
+    const stored =
+      step.kind === 'paste_api_key' ? connection?.hasSecret : connection?.hasClientSecret
+    return (
+      <>
+        <SmallButton primary onClick={() => onEditCredentials(step.connectionName)}>
+          {stored ? 'Replace' : 'Enter'}{' '}
+          {step.kind === 'paste_api_key' ? 'key' : 'client id and secret'}
+        </SmallButton>
+        {step.url && <OpenPage url={step.url} />}
+      </>
+    )
+  }
+
   if (step.kind === 'connect_oauth' && step.connectionName && onConnect) {
     return (
       <SmallButton
@@ -217,27 +260,17 @@ function Action({
     )
   }
 
-  if (step.url) {
-    // A plain anchor, not an IPC call: `window.ts` installs a
-    // `setWindowOpenHandler` that sends every `target="_blank"` to the system
-    // browser and denies in-shell navigation, so this already does the right thing
-    // and needs no new bridge. `rel` is belt and braces — the handler denies the
-    // navigation anyway, but the URL came from a model reading a web page.
-    return (
-      <a
-        href={step.url}
-        target="_blank"
-        rel="noreferrer noopener"
-        title={step.url}
-        className="rounded-control border border-line px-2 py-1 text-meta text-ink transition hover:border-accent-deep"
-      >
-        Open page
-      </a>
-    )
-  }
+  if (step.url) return <OpenPage url={step.url} />
 
-  if (step.kind === 'paste_api_key' || step.kind === 'set_client_credentials') {
-    return <span className="text-xs text-muted">Use the connection’s panel below.</span>
+  if (needsCredentials) {
+    // No `onEditCredentials`: this is the Build tab, a tab away from the connection
+    // list. The "Open in Connections" link beside this is the route.
+    return (
+      <span className="text-xs text-muted">
+        Open it in Connections and press{' '}
+        {step.kind === 'paste_api_key' ? 'Set key' : 'Set app'}.
+      </span>
+    )
   }
 
   if (step.kind === 'set_env' && step.envName) {
@@ -249,4 +282,25 @@ function Action({
   }
 
   return null
+}
+
+/**
+ * A plain anchor, not an IPC call: `window.ts` installs a `setWindowOpenHandler`
+ * that sends every `target="_blank"` to the system browser and denies in-shell
+ * navigation, so this already does the right thing and needs no new bridge. `rel` is
+ * belt and braces — the handler denies the navigation anyway, but the URL came from
+ * a model reading a web page.
+ */
+function OpenPage({ url }: { url: string }): React.JSX.Element {
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noreferrer noopener"
+      title={url}
+      className="rounded-control border border-line px-2 py-1 text-meta text-ink transition hover:border-accent-deep"
+    >
+      Open page
+    </a>
+  )
 }

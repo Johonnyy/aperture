@@ -42,6 +42,11 @@ export function AppCard({
   /** The newest published version of this app, when its manifest names a repo. */
   release?: ReleaseInfo
   checkingRelease?: boolean
+  /**
+   * Re-ask GitHub for this app's newest release, ignoring the ten-minute cache.
+   * Undefined when the manifest names no repo, which is the one case where there is
+   * genuinely nothing to ask.
+   */
   onCheckReleases?: () => void
   /** What upstream and server would be if the stanza does not say. */
   defaults?: { upstream?: string | null; server?: string | null }
@@ -363,6 +368,63 @@ export function AppCard({
             <SmallButton onClick={onOpenTerminal}>Terminal here</SmallButton>
           </Row>
 
+          {/* --- updates ---
+              The row above the card only offers "Check" while the answer is *unknown*,
+              which leaves the ordinary case with no way out: once a check has said
+              "up to date" that verdict is cached for ten minutes, and publishing a
+              release inside that window leaves the card confidently wrong with nothing
+              to press. Restarting does not help either and reasonably looks like it
+              should — `restart` is `compose up -d`, so it re-runs the pinned tag rather
+              than looking for a newer one, and the pin is exactly what a stale check
+              has failed to update.
+
+              So: one button that always exists, forces a fresh call to GitHub for this
+              repo alone, and says when the answer it is showing was taken. */}
+          <Row label="Updates">
+            {onCheckReleases ? (
+              <>
+                <SmallButton
+                  disabled={checkingRelease}
+                  title={`Ask GitHub for the newest published release of ${app.name}, ignoring the ten-minute cache`}
+                  onClick={onCheckReleases}
+                >
+                  {checkingRelease ? 'Checking…' : 'Check for updates'}
+                </SmallButton>
+                {/* The same action as the Update button on the row above, offered here
+                    too because this is where you are standing when the check comes back
+                    behind — one `run('updateApp')`, not a second update path. */}
+                {canUpdate && (
+                  <SmallButton
+                    primary
+                    title={`Pin ${app.name} to ${release?.latest} and restart it, reverting if it does not come back healthy`}
+                    onClick={() =>
+                      run('updateApp', `Update ${app.name} to ${release?.latest}`, {
+                        ...params,
+                        tag: release?.latest ?? '',
+                      })
+                    }
+                  >
+                    Update to v{release?.latest}
+                  </SmallButton>
+                )}
+                <span className="text-micro text-muted">
+                  {release?.error
+                    ? // Never softened into "up to date": a check that failed is not
+                      // evidence, and the reason is the only thing that fixes it.
+                      `${release.error} · last tried ${since(release.checkedAt)}`
+                    : release?.latest
+                      ? `latest v${release.latest} · checked ${since(release.checkedAt)}`
+                      : 'not checked yet'}
+                </span>
+              </>
+            ) : (
+              <span className="text-micro text-muted">
+                No release repo in this app&apos;s manifest, so there is nothing to check
+                against — pin a tag by hand under Advanced.
+              </span>
+            )}
+          </Row>
+
           {/* The app's own fields, as opposed to its env. Nothing derives these and
               everything depends on them: `domain` is the exact name Caddy asks Let's
               Encrypt for. It was previously readable here and editable only over SSH,
@@ -615,6 +677,23 @@ function Stanza({
       {hint && <span className="text-micro text-muted">{hint}</span>}
     </>
   )
+}
+
+/**
+ * An epoch timestamp as an age.
+ *
+ * The point of showing it at all is that a release answer is cached for ten minutes, so
+ * "up to date" is a claim about a moment rather than about now — and the reader has to
+ * be able to see which moment before deciding whether to press Check again.
+ */
+function since(at: number): string {
+  const seconds = Math.max(0, Math.round((Date.now() - at) / 1000))
+  if (seconds < 60) return 'just now'
+  const minutes = Math.round(seconds / 60)
+  if (minutes < 90) return `${minutes}m ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 48) return `${hours}h ago`
+  return `${Math.round(hours / 24)}d ago`
 }
 
 function Row({

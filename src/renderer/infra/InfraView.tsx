@@ -58,6 +58,9 @@ export function InfraView({
   // "latest unknown", which is the honest answer and never a green one.
   const [releases, setReleases] = useState<Record<string, ReleaseInfo>>({})
   const [checkingReleases, setCheckingReleases] = useState(false)
+  // Which single repo is being re-checked right now, so one row's "Check for updates"
+  // spins that row rather than every row on the page.
+  const [checkingRepo, setCheckingRepo] = useState<string | null>(null)
 
   // Through a ref for the same reason as the password below: the repo field is a text
   // input, and rebuilding this callback per keystroke would re-fire the release check.
@@ -84,6 +87,25 @@ export function InfraView({
     },
     [],
   )
+
+  /**
+   * Re-ask GitHub about one repo, ignoring the ten-minute cache.
+   *
+   * Separate from `checkReleases(status, true)` because the button that calls it is
+   * per app: forcing every repo would spend one rate-limited request per row to answer
+   * a question about one of them, which is how a page-wide "Check now" gets you rate
+   * limited by the third click. The result is **merged**, not assigned — a single-repo
+   * response only contains that repo, so replacing the map would blank every other row.
+   */
+  const checkRepo = useCallback(async (repo: string) => {
+    setCheckingRepo(repo)
+    try {
+      const one = await window.aperture.infra.releases([repo], true)
+      setReleases((prev) => ({ ...prev, ...one }))
+    } finally {
+      setCheckingRepo(null)
+    }
+  }, [])
 
   // Read through a ref so the runner's identity doesn't change on every keystroke
   // in the password field, which would remount the operation log mid-install.
@@ -367,31 +389,32 @@ export function InfraView({
               <p className="text-xs text-muted">Nothing installed here yet.</p>
             ) : (
               <ul className="flex flex-col gap-2">
-                {here.map((app) => (
-                  <AppCard
-                    key={app.name}
-                    app={app}
-                    run={run}
-                    onOpenTerminal={() => onOpenTerminal()}
-                    advanced={advanced}
-                    credentials={credentials}
-                    onCredentialSaved={() => void refreshCredentials()}
-                    release={
-                      app.manifest?.release?.repo
-                        ? releases[app.manifest.release.repo]
-                        : undefined
-                    }
-                    checkingRelease={checkingReleases}
-                    onCheckReleases={() => void checkReleases(status, true)}
-                    // Both derivable, so neither should ever be an empty box you have
-                    // to guess at: the loopback port comes out of the app's compose
-                    // file, and the box label out of infra.server.
-                    defaults={{
-                      upstream: status.catalogue.find((c) => c.name === app.name)?.upstream,
-                      server: status.serverLabel,
-                    }}
-                  />
-                ))}
+                {here.map((app) => {
+                  const repo = app.manifest?.release?.repo ?? null
+                  return (
+                    <AppCard
+                      key={app.name}
+                      app={app}
+                      run={run}
+                      onOpenTerminal={() => onOpenTerminal()}
+                      advanced={advanced}
+                      credentials={credentials}
+                      onCredentialSaved={() => void refreshCredentials()}
+                      release={repo ? releases[repo] : undefined}
+                      checkingRelease={checkingReleases || checkingRepo === repo}
+                      // Undefined when the manifest names no repo — the card then says
+                      // there is nothing to ask, rather than offering a dead button.
+                      onCheckReleases={repo ? () => void checkRepo(repo) : undefined}
+                      // Both derivable, so neither should ever be an empty box you have
+                      // to guess at: the loopback port comes out of the app's compose
+                      // file, and the box label out of infra.server.
+                      defaults={{
+                        upstream: status.catalogue.find((c) => c.name === app.name)?.upstream,
+                        server: status.serverLabel,
+                      }}
+                    />
+                  )
+                })}
               </ul>
             )}
             <Catalogue

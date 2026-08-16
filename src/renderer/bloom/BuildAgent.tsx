@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import type { Build, Connection } from '../../shared/bloom'
+import { Markdown } from '../chat/Markdown'
 import { Chip, SmallButton } from '../infra/parts'
 import { useStore } from '../store'
 import { SetupChecklist } from './SetupChecklist'
@@ -248,11 +249,23 @@ function BuildResult({
         </Chip>
       </header>
 
+      {/* What the agent can actually do, from the connections that got attached.
+          This is the durable record rather than the narration, which is the whole
+          reason it can be drawn as a grid: the live trace's prose has already been
+          flattened by the sentence splitter, but `tools` is structured data. */}
+      {connections.length > 0 && <Capabilities connections={connections} />}
+
       {/* On a failed build this is the *point*: "no usable MCP server and no
           manifest" is a deliberate outcome, and the summary is where the builder
-          says what it found and what a human would have to add. */}
+          says what it found and what a human would have to add.
+
+          Through the markdown renderer because Bloom stores `summary` with its
+          newlines intact — unlike the streamed narration, whose structure is gone
+          by the time it arrives. */}
       {build.summary && (
-        <p className="whitespace-pre-wrap text-xs text-muted">{build.summary}</p>
+        <div className="text-xs text-muted">
+          <Markdown>{build.summary}</Markdown>
+        </div>
       )}
       {build.error && build.status === 'failed' && (
         <p className="font-mono text-micro text-danger">{build.error}</p>
@@ -269,5 +282,55 @@ function BuildResult({
         />
       )}
     </section>
+  )
+}
+
+/**
+ * What the new agent can do, and what it needs before it can do it.
+ *
+ * `tools` is the exact scope-filtered set the runner would register, so this is not
+ * a summary of the build — it is the capability list itself. A pending connection is
+ * shown as pending rather than hidden: an agent with four tools and no consent yet
+ * is a normal, temporary state, and the checklist below says how to finish it.
+ */
+function Capabilities({ connections }: { connections: Connection[] }): React.JSX.Element {
+  const TONE: Record<string, string> = {
+    active: 'bg-ok',
+    pending: 'bg-warn',
+    expired: 'bg-warn',
+    needs_reauth: 'bg-warn',
+    revoked: 'bg-danger',
+  }
+
+  return (
+    <div className="flex flex-col gap-2">
+      {connections.map((connection) => (
+        <div key={connection.id} className="flex flex-col gap-1.5">
+          <div className="flex items-center gap-1.5">
+            <span
+              className={`size-1.5 shrink-0 rounded-full ${TONE[connection.status] ?? 'bg-muted'}`}
+            />
+            <span className="text-meta text-ink">
+              {connection.label || connection.name}
+            </span>
+            <span className="text-nano tracking-wide text-muted uppercase">
+              {connection.kind.replace('_', ' ')} · {connection.status.replace('_', ' ')}
+            </span>
+          </div>
+          {connection.tools.length > 0 && (
+            <ul className="flex flex-wrap gap-1 pl-3">
+              {connection.tools.map((tool) => (
+                <li
+                  key={tool}
+                  className="rounded-control border border-line px-1.5 py-0.5 font-mono text-nano text-muted"
+                >
+                  {tool}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ))}
+    </div>
   )
 }
