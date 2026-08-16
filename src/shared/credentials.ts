@@ -48,6 +48,18 @@ export function publicView(record: StoredCredential, readable: boolean): Credent
 }
 
 /**
+ * Whether a key name alone says "never render this".
+ *
+ * Mirrors the suffix rule `deploy/status.sh` uses to decide which values to omit from
+ * the report, and is the fallback for a key no manifest describes — a box predating
+ * manifests, or a variable somebody added by hand. One copy, because a UI masking on a
+ * different rule than the one that withheld the value is a UI that shows a secret.
+ */
+export function looksSecret(name: string): boolean {
+  return /(_KEY|_KEYS|_TOKEN|_SECRET|_PASSWORD|_PASS)$/.test(String(name ?? ''))
+}
+
+/**
  * Normalise a credential id to the shape manifests use, so a value saved as
  * "OpenRouter API Key" still matches `credential: openrouter-api-key`.
  *
@@ -94,6 +106,17 @@ export interface ManifestKey {
    * this off the type is what let that happen — see the `config` branch below.
    */
   default?: string | null
+  /**
+   * The manifest's one-line reason this key exists.
+   *
+   * Carried through rather than dropped because the checklist is not the only reader
+   * any more: the configuration list shows every key an installed app has, and a name
+   * like `AMBER_FEATURE_SIGNALS` is not self-explaining to the person deciding whether
+   * to change it.
+   */
+  why?: string | null
+  /** Never render this as text. Authoritative over the name-suffix guess. */
+  secret?: boolean
 }
 
 export interface ReadinessItem {
@@ -106,6 +129,10 @@ export interface ReadinessItem {
   required: boolean
   /** The manifest default, so the checklist can show and offer to override it. */
   default: string | null
+  /** The manifest's reason this key exists, for a list that is read, not just counted. */
+  why: string | null
+  /** Never displayed. The manifest's word, falling back to the name-suffix rule. */
+  secret: boolean
   /**
    * How this key will get its value, and whether anything is still needed.
    *
@@ -172,6 +199,10 @@ export function readinessOf(
       helpUrl: k.helpUrl ?? null,
       group: k.group ?? null,
       default: k.default ?? null,
+      why: k.why ?? null,
+      // The manifest is authoritative when it says anything; otherwise the same suffix
+      // rule `status.sh` applies, so a key with no manifest entry is still masked.
+      secret: k.secret ?? looksSecret(k.name),
       required,
       state,
       matches,

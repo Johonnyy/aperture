@@ -213,32 +213,11 @@ function NeedsValue({
   credentials: CredentialSummary[]
   onSaved: () => void
 }): React.JSX.Element {
-  const [open, setOpen] = useState(false)
-  const [value, setValue] = useState('')
-  const [error, setError] = useState<string | null>(null)
-
   // An entry exists but this machine cannot decrypt it — a different answer from
   // "you have never saved one", and a different fix.
   const unreadable = item.credential
     ? matchFor(item.credential, credentials).some((m) => !m.readable)
     : false
-
-  const save = async (): Promise<void> => {
-    if (!item.credential || !value) return
-    try {
-      await window.aperture.keys.save({
-        credentialId: item.credential,
-        label: item.label,
-        value,
-      })
-      setValue('')
-      setOpen(false)
-      setError(null)
-      onSaved()
-    } catch (err) {
-      setError((err as Error).message)
-    }
-  }
 
   return (
     <>
@@ -258,13 +237,63 @@ function NeedsValue({
         </a>
       )}
       {item.credential && (
-        <SmallButton onClick={() => setOpen((o) => !o)}>{open ? 'Cancel' : 'Enter…'}</SmallButton>
+        <SaveToVault credentialId={item.credential} label={item.label} onSaved={onSaved} />
       )}
+    </>
+  )
+}
+
+/**
+ * Put a value in the credential vault, from wherever you happened to find out you
+ * needed it.
+ *
+ * Split out of `NeedsValue` when the configuration list needed the same control: the
+ * checklist offers it before an install, and the app's own configuration offers it
+ * afterwards, and those must save to the same place under the same id or the "one
+ * value, every app" promise quietly stops holding.
+ *
+ * Inline rather than a link to the Keys page, because the moment you find out you need
+ * an OpenRouter key is the moment you have one in the clipboard.
+ */
+export function SaveToVault({
+  credentialId,
+  label,
+  onSaved,
+}: {
+  credentialId: string
+  label: string
+  onSaved: () => void
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const [value, setValue] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const save = async (): Promise<void> => {
+    if (!value) return
+    try {
+      await window.aperture.keys.save({ credentialId, label, value })
+      setValue('')
+      setOpen(false)
+      setError(null)
+      onSaved()
+    } catch (err) {
+      setError((err as Error).message)
+    }
+  }
+
+  return (
+    <>
+      <SmallButton
+        title={`Save this once as ${credentialId}, for every app that asks for it`}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {open ? 'Cancel' : 'Enter…'}
+      </SmallButton>
       {open && (
         <span className="flex w-full flex-wrap items-center gap-2 pl-5">
-          <Field value={value} onChange={setValue} placeholder={`paste ${item.label}`} type="password" />
+          <Field value={value} onChange={setValue} placeholder={`paste ${label}`} type="password" />
           <SmallButton primary disabled={!value} onClick={() => void save()}>
-            Save
+            Save to vault
           </SmallButton>
           <span className="text-micro text-muted">
             Saved once, for every app that asks for it.

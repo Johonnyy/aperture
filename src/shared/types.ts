@@ -350,6 +350,17 @@ export const REGISTRY_SCHEMA = 10
 export const SYNC_STORE_IMAGE_SCHEMA = 11
 
 /**
+ * The document version that can see PEERING at all.
+ *
+ * Schema 12 adds `apps[].peers` / `peerTokenFingerprint` / `bearerKeys` and
+ * `syncStore.servers[].tokenFp`. Below it the peer surface degrades to a single
+ * `unclear` row per pairing rather than disappearing: "this box's script cannot tell
+ * you" is a finding, and hiding it would leave the screen looking like there is
+ * nothing to wire — which is exactly the state that made Bloom invisible for a week.
+ */
+export const PEERS_SCHEMA = 12
+
+/**
  * What a box still carries from before it was containerised.
  *
  * This repo assumes it owns 80, 443 and each app's loopback port; a Caddy or an Amber
@@ -509,6 +520,71 @@ export interface InfraApp {
    * token-shaped run replaced.
    */
   registrationLog?: string[]
+
+  // --- peering. Present from schema 12; see PEERS_SCHEMA. --------------------
+  //
+  // Registration and peering are different relations, and this document could only
+  // see the first. An app can be registered, healthy and mounting its MCP server —
+  // every green light schema 10 could show — while the one agent that matters has no
+  // tool for it, because that agent's peer map is empty. Nothing is degraded in that
+  // state and nothing errors: an unlisted peer is offered as no tools at all.
+
+  /**
+   * Who this app CALLS, parsed from the peer map in its **live** `.env`.
+   *
+   * Live rather than declared, because that is what the running container is acting
+   * on. The gap between this and secrets.yaml is precisely the "wired, not yet
+   * reconciled" state, which needs a different sentence from "not wired".
+   */
+  peers?: PeerLink[]
+  /**
+   * Digest of the single bearer this app presents to every peer in `peers`.
+   *
+   * Singular, and that is a real constraint rather than a simplification here:
+   * `agent_mcp.load_static_peers(spec, token)` applies one token to the whole map, so
+   * two peers wanting different credentials is not expressible. Comparing this
+   * against a callee's `bearerKeys` entry is what turns a 401 into a named state.
+   */
+  peerTokenFingerprint?: string | null
+  /** Who this app ACCEPTS, per declared token list. */
+  bearerKeys?: BearerKey[]
+  /** The env key holding the peer map, from the manifest's `peer_map` kind. */
+  peerMapKey?: string | null
+  /** The env key holding the peer bearer, from the manifest's `peer_token` kind. */
+  peerTokenKey?: string | null
+}
+
+/** One entry in an app's peer map — a name and where it points. */
+export interface PeerLink {
+  name: string
+  /** As written in the env file. Should be a bare origin, no path. */
+  baseUrl: string
+  /**
+   * What `agent_runtime`'s MCP client will actually open: base + `/mcp/`.
+   *
+   * Resolved on the box by the same rule the client uses, and reported rather than
+   * left to be imagined, because the most common hand-written mistake — pasting the
+   * endpoint instead of the origin — produces `/mcp/mcp/` and a 404 that reads
+   * exactly like the peer being down. Null when the entry has no URL at all.
+   */
+  endpoint: string | null
+}
+
+/**
+ * One `generated:token` key on an app, and who may present a bearer from it.
+ *
+ * A list rather than a single field because an app legitimately keeps more than one:
+ * Bloom separates `BLOOM_MCP_KEYS` (peer agents, which spend money) from
+ * `BLOOM_ADMIN_KEYS` (the GUI, which edits configuration), so that one leaked token
+ * cannot buy both. Which list a given caller belongs to is declared in the manifest's
+ * `peers:`, never guessed from the key's name.
+ */
+export interface BearerKey {
+  key: string
+  /** Caller names the manifest says this list is for. */
+  peers: string[]
+  /** The entries actually present, as name + fingerprint. Never a token. */
+  entries: SyncStoreKey[]
 }
 
 /**
@@ -690,6 +766,22 @@ export interface SyncStoreServer {
   baseUrl: string
   lastSeen: string | null
   stale: boolean
+  /**
+   * Whether the registry holds a peer credential for this server. Schema 12.
+   *
+   * The store keeps one token per server, settable only through
+   * `PUT /servers/{name}/token`, and hands it out on discovery — it is what
+   * `agent_mcp.PeerRegistry.refresh` loads and what `agent_runtime`'s MCP client
+   * sends as the outbound `Authorization`. So an agent that resolves peers through
+   * the registry presents THIS, not the value in its own env file, and the two can
+   * disagree with nothing anywhere saying so.
+   *
+   * Undefined on a box older than schema 12 — which is not the same as false, and is
+   * why this is a separate field from `tokenFp` rather than inferred from it.
+   */
+  tokenSet?: boolean
+  /** Fingerprint of that credential, or null when none is set. Never the token. */
+  tokenFp?: string | null
 }
 
 export interface DeployRecord {

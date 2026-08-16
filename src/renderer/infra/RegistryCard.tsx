@@ -4,6 +4,7 @@ import { diagnose, type RegistryNode } from '../../shared/registry'
 import { SYNC_STORE_IMAGE_SCHEMA, type InfraStatus } from '../../shared/types'
 import { compareVersions, tagOf, type ReleaseInfo } from '../../shared/version'
 import { Card, Chip, Field, SmallButton } from './parts'
+import { PeerLinks } from './PeerLinks'
 import { layoutOf } from './registry-layout'
 import { RegistryMap } from './RegistryMap'
 import type { Params } from './useRunner'
@@ -139,6 +140,18 @@ export function RegistryCard({
       {map.apps.length === 0 && (
         <p className="text-xs text-muted">Nothing is declared on this box yet.</p>
       )}
+
+      {/* The second relation over the same nodes. Inside this card, under the map,
+          because "registered" and "callable" look like the same question and are not
+          — which is exactly how Bloom stayed a perfect green line to the trunk while
+          Amber had no tool for it. */}
+      <PeerLinks
+        status={status}
+        run={run}
+        advanced={advanced}
+        needsPassword={needsPassword}
+        registryHasAction={map.next?.fix.kind === 'action'}
+      />
 
       <Version status={status} release={release} run={run} disabled={needsPassword} />
 

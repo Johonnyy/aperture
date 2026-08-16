@@ -59,11 +59,28 @@ for (const [label, value] of [
   check(`${label} does not survive redaction`, leaked, false)
 }
 
-console.log('\nthe other secret-carrying action\n')
+console.log('\nthe other secret-carrying actions\n')
 
 const peer = compose(ACTIONS.setPeerToken, { name: 'bloom', token: 'peer-t0ken' }, { withSudo: true })
 check('setPeerToken also puts its token in a heredoc', peer.includes('peer-t0ken'), true)
 check('…and it is redacted too', redactCommand(peer).includes('peer-t0ken'), false)
+
+// The two `resolvesCredentials` actions. Their value never passes through the renderer
+// at all — main decrypts a uid — which makes the op log the ONLY place it could leak,
+// and the rehearsal a second surface the others do not have.
+const VAULTED = [{ key: 'BLOOM_OPENROUTER_API_KEY', value: SECRET }]
+for (const [label, action] of [['fillVar', ACTIONS.fillVar], ['installApp', ACTIONS.installApp]]) {
+  const real = compose(action, { app: 'bloom', domain: 'b.example' }, { withSudo: true, secrets: VAULTED })
+  check(`${label} carries the vault value`, real.includes(SECRET), true)
+  check(`…redacted out of the real run`, redactCommand(real).includes(SECRET), false)
+  const dry = compose(action, { app: 'bloom', domain: 'b.example' }, { withSudo: true, dryRun: true, secrets: VAULTED })
+  check(`…and out of the rehearsal`, redactCommand(dry).includes(SECRET), false)
+}
+// fillVar's rehearsal reports shape, not content — it must not echo the value even
+// before redaction gets a chance to, because a rehearsal is what people read closely.
+const fillDry = compose(ACTIONS.fillVar, { app: 'bloom' }, { withSudo: true, dryRun: true, secrets: VAULTED })
+check('fillVar rehearses by length, not by value', fillDry.includes(SECRET), false)
+check('…and does say how long it is', fillDry.includes(`${SECRET.length} characters`), true)
 
 console.log('\ncommands with nothing to hide\n')
 

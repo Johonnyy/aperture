@@ -1,7 +1,7 @@
 {
   "name": "aperture",
   "version": "0.1.0",
-  "description": "Amber's desktop client \u2014 chat, live trace, and an SSH bridge Amber can drive.",
+  "description": "Amber's desktop client — chat, live trace, and an SSH bridge Amber can drive.",
   "main": "./out/main/index.js",
   "author": "Johnny Patino",
   "license": "MIT",
@@ -11,7 +11,7 @@
     "build": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "verify": "npm run verify:connection && npm run verify:voice && npm run verify:model && npm run verify:install && npm run verify:typeahead && npm run verify:theme && npm run verify:settings && npm run verify:bloom-keys && npm run verify:bloom-wire && npm run verify:bloom-client && npm run verify:bloom-stream && npm run verify:infra-redact && npm run verify:credentials && npm run verify:releases && npm run verify:registry",
+    "verify": "npm run verify:connection && npm run verify:voice && npm run verify:model && npm run verify:install && npm run verify:typeahead && npm run verify:theme && npm run verify:settings && npm run verify:bloom-keys && npm run verify:bloom-wire && npm run verify:bloom-client && npm run verify:bloom-stream && npm run verify:infra-redact && npm run verify:credentials && npm run verify:configuration && npm run verify:releases && npm run verify:registry && npm run verify:peers",
     "verify:settings": "esbuild src/renderer/settings/tree.ts --bundle --platform=node --format=esm --outfile=out/verify/settings-tree.mjs && node scripts/verify-settings.mjs",
     "verify:registry": "esbuild src/shared/registry.ts --bundle --platform=node --format=esm --outfile=out/verify/registry.mjs && esbuild src/renderer/infra/registry-layout.ts --bundle --platform=node --format=esm --outfile=out/verify/registry-layout.mjs && esbuild src/main/infra/actions.ts --bundle --platform=node --format=esm --outfile=out/verify/actions.mjs && node scripts/verify-registry.mjs",
     "verify:theme": "esbuild src/shared/theme.ts --bundle --platform=node --format=esm --outfile=out/verify/theme.mjs && node scripts/verify-theme.mjs",
@@ -26,7 +26,9 @@
     "verify:bloom-stream": "esbuild src/main/bloom/run-stream.ts --bundle --platform=node --format=esm --outfile=out/verify/run-stream.mjs && node scripts/verify-bloom-stream.mjs",
     "verify:infra-redact": "esbuild src/main/infra/redact.ts --bundle --platform=node --format=esm --outfile=out/verify/redact.mjs && esbuild src/main/infra/actions.ts --bundle --platform=node --format=esm --outfile=out/verify/actions.mjs && node scripts/verify-infra-redact.mjs",
     "verify:credentials": "esbuild src/shared/credentials.ts --bundle --platform=node --format=esm --outfile=out/verify/credentials.mjs && node scripts/verify-credentials.mjs",
-    "verify:releases": "esbuild src/main/infra/releases.ts --bundle --platform=node --format=esm --outfile=out/verify/releases.mjs && node scripts/verify-releases.mjs"
+    "verify:configuration": "esbuild src/shared/credentials.ts --bundle --platform=node --format=esm --outfile=out/verify/credentials.mjs && esbuild src/shared/configuration.ts --bundle --platform=node --format=esm --outfile=out/verify/configuration.mjs && node scripts/verify-configuration.mjs",
+    "verify:releases": "esbuild src/main/infra/releases.ts --bundle --platform=node --format=esm --outfile=out/verify/releases.mjs && node scripts/verify-releases.mjs",
+    "verify:peers": "esbuild src/shared/peers.ts --bundle --platform=node --format=esm --outfile=out/verify/peers.mjs && esbuild src/main/infra/actions.ts --bundle --platform=node --format=esm --outfile=out/verify/actions.mjs && node scripts/verify-peers.mjs"
   },
   "dependencies": {
     "ssh2": "^1.16.0",

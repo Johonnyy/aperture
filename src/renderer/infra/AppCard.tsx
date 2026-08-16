@@ -2,7 +2,7 @@ import { useState } from 'react'
 
 import { containerExists } from '../../shared/bloom'
 import type { CredentialSummary, InfraApp } from '../../shared/types'
-import { EnvEditor } from './EnvEditor'
+import { Configuration } from './Configuration'
 import { Chip, Field, SmallButton } from './parts'
 import { fillsFor, readinessFor, ReadinessList, ReadinessSummary } from './Readiness'
 import { compareVersions, tagOf, type ReleaseInfo } from '../../shared/version'
@@ -62,10 +62,6 @@ export function AppCard({
   const drift = Boolean(
     app.imagePinned && app.imageRunning && app.imagePinned !== app.imageRunning,
   )
-  // secrets.yaml is the source; the container reads a rendered .env. A key present in
-  // one and not the other means an edit that has not been reconciled yet — the same
-  // class of "looks green, isn't what you think" as the image-tag drift above.
-  const drifted = app.env.filter((v) => !app.envKeys.includes(v.name))
   /**
    * Declared in secrets.yaml with nothing running.
    *
@@ -224,6 +220,17 @@ export function AppCard({
             </span>
           )}
           {notDeployed && readiness && <ReadinessSummary readiness={readiness} />}
+          {/* A deployed app missing a required key is the "no symptom at all" case:
+              the container is up, health is green, and the one capability that key
+              buys is silently absent. Say it on the row, where the other states are,
+              rather than only inside Manage. */}
+          {!notDeployed && blocked && (
+            <span
+              title={`Missing ${readiness?.missing.map((m) => m.label).join(', ')} — open Manage to supply ${readiness && readiness.missing.length === 1 ? 'it' : 'them'}`}
+            >
+              <Chip tone="warn">needs {readiness?.missing.length} value{readiness?.missing.length === 1 ? '' : 's'}</Chip>
+            </span>
+          )}
           {stopped && (
             <SmallButton
               primary
@@ -391,10 +398,45 @@ export function AppCard({
             />
           </Row>
 
+          {/* Configuration, ungated.
+              This was the env editor, behind Advanced mode and listing only what
+              secrets.yaml already held — which meant the one question worth asking
+              ("what does this app need that it hasn't got?") was both unanswerable and
+              in a place most people never open, because a key nothing has written has
+              no row in secrets.yaml to appear as. It joins the manifest now, so a
+              missing key is a row rather than an absence, and it is always visible:
+              principle 2 says a value you can only fix over SSH is a missing feature. */}
+          <div className="border-t border-line pt-3">
+            <p className="mb-2 text-meta text-muted">Configuration</p>
+            <Configuration
+              app={app}
+              readiness={readiness}
+              credentials={credentials}
+              run={run}
+              onCredentialSaved={onCredentialSaved}
+              // install.sh is the reconcile for an app already deployed — the same
+              // action the Deploy row above spells "Reconcile", not a second path.
+              // Null without a domain, because that is what install.sh refuses on.
+              onReconcile={
+                notDeployed || !app.domain
+                  ? null
+                  : () => run('install', `Reconcile ${app.name}`, installParams)
+              }
+              advanced={advanced}
+              disabled={false}
+            />
+          </div>
+
           {/* Everything from here down is machinery. Behind Advanced mode, not because
               it is dangerous but because it is rarely the answer: pinning an image by
-              hand, renaming, editing an env var directly. Deploy and Remove above are
-              the ordinary path. */}
+              hand, rolling back, renaming. Deploy, Configuration and Remove are the
+              ordinary path.
+
+              Editing a value used to be listed here too, and that was the mistake this
+              change undoes — a setting you cannot see without opting into the machinery
+              is a setting you edit over SSH. Advanced still gates the two things that
+              are about the *shape* of secrets.yaml rather than a value in it: adding a
+              key by hand and deleting one. Both live inside the Configuration section. */}
           {advanced && (
           <>
           <Row label="Pin">
@@ -521,26 +563,6 @@ export function AppCard({
             )}
           </Row>
 
-          {advanced && (
-          <div className="border-t border-line pt-3">
-            <div className="mb-2 flex items-center gap-2">
-              <span className="w-16 shrink-0 text-meta text-muted">Env</span>
-              {drifted.length > 0 && (
-                <Chip tone="warn">
-                  {drifted.length} not yet in the running .env
-                </Chip>
-              )}
-            </div>
-            {app.env.length > 0 ? (
-              <EnvEditor app={app.name} vars={app.env} run={run} disabled={false} />
-            ) : (
-              <p className="text-meta text-muted">
-                Nothing under <code>apps.{app.name}.env</code>, or secrets.yaml could not
-                be read — enter the sudo password and re-read.
-              </p>
-            )}
-          </div>
-          )}
         </div>
       )}
     </li>

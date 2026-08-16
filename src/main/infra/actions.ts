@@ -431,6 +431,56 @@ export const ACTIONS: Record<string, ActionDef> = {
       ].join('\n'),
   },
 
+  /**
+   * Write one key from a saved credential, without installing anything.
+   *
+   * The vault could already fill a key, but only as a step inside `installApp` — so
+   * "you have this value saved and this running app is missing it" had no one-click
+   * answer that was not a full reconcile-and-restart. That is the wrong size of
+   * hammer for adding `AMBER_SEARCH_API_KEY` to a box, and being the wrong size is
+   * how it ends up being done over SSH instead.
+   *
+   * Same shape as `setVar` — it writes `secrets.yaml` and says plainly that the
+   * running container still has the old value — except the value comes from
+   * `p.fills` and is decrypted in main. The renderer sends uids and never values;
+   * there is no IPC channel that would give it one.
+   */
+  fillVar: {
+    label: 'Fill from a saved credential',
+    needsSudo: true,
+    resolvesCredentials: true,
+    rehearse: (p, secrets) =>
+      [
+        `[ -f ${q(SECRETS)} ] || { echo "error: no ${SECRETS} yet."; exit 1; }`,
+        ...(secrets ?? []).map(
+          (s) =>
+            // Length, never content. A rehearsal that echoed the key back would put it
+            // in the log the operator is about to copy out of.
+            `echo " ok  would write .apps.${JSON.stringify(p.app)}.env.${JSON.stringify(s.key)}` +
+            ` from the saved credential (${s.value.length} characters)"`,
+        ),
+        ...((secrets ?? []).length === 0
+          ? [`echo "error: no saved credential was resolved for this key."; exit 1`]
+          : []),
+        `echo " !  the running app keeps its current value until it is reconciled"`,
+      ].join('\n'),
+    build: (p, secrets) =>
+      [
+        'set -e',
+        `[ -f ${q(SECRETS)} ] || { echo "error: no ${SECRETS} yet."; exit 1; }`,
+        `cp -a ${q(SECRETS)} ${q(`${SECRETS}.bak`)}`,
+        ...(secrets ?? []).flatMap((s) => [
+          heredoc('APERTURE_VALUE', s.value),
+          `V="$APERTURE_VALUE" yq -i ` +
+            `${q(`.apps.${JSON.stringify(p.app)}.env.${JSON.stringify(s.key)} = strenv(V)`)} ` +
+            `${q(SECRETS)}`,
+          `echo " ok  ${s.key} filled from the saved credential"`,
+        ]),
+        `chmod 600 ${q(SECRETS)}`,
+        `echo " !  the running app still has the old value — reconcile it to render the new .env and restart"`,
+      ].join('\n'),
+  },
+
   unsetVar: {
     label: 'Remove a value',
     needsSudo: true,
@@ -803,6 +853,61 @@ export const ACTIONS: Record<string, ActionDef> = {
       `curl -fsS -X PUT ${SYNC_BASE}/servers/${q(p.name)}/token ` +
       `-H "Authorization: Bearer ${ADMIN_TOKEN}" -H 'Content-Type: application/json' ` +
       `--data @- <<'APERTURE_EOF'\n${JSON.stringify({ token: p.token })}\nAPERTURE_EOF`,
+  },
+
+  // --- peering --------------------------------------------------------------
+
+  /**
+   * Wire one app to call another's MCP server.
+   *
+   * The failure this ends: Bloom was registered, healthy, mounting its MCP server and
+   * answering 401 to an unauthenticated probe — every green light the Registry card
+   * can show — and Amber had no tool for it, because `AMBER_MCP_PEERS` was empty and
+   * her broker is built from that string alone. Nothing errors in that state. An
+   * unlisted peer is offered as no tools at all, so the only symptom is a model that
+   * does not mention a capability you believe it has.
+   *
+   * Doing it by hand is four values in the right shape and three ways to get it
+   * wrong that all present as a plain 401 or a 404 — the peer map takes an ORIGIN
+   * (the client appends `/mcp/` itself), the bearer is the token HALF of the callee's
+   * key list (`amber:abc123` → `abc123`), and the name half has to be the caller's.
+   *
+   * None of that is spelled here. `connect-peer.sh` reads the pairing out of the two
+   * manifests — the same rule at the top of this file that took prefix-guessing away
+   * from `declareApp` — mints or reuses the bearer on the box, merges both
+   * comma-separated lists rather than clobbering them, and publishes the token to the
+   * registry so discovery works too. Aperture composes two flags and knows nothing
+   * about how a peer link is spelled.
+   *
+   * It writes secrets.yaml, which is the source, so `installApp` is what carries it
+   * across. The script says so; `peers.ts` models that gap as its own `pending`
+   * state rather than letting a completed connect look like it did nothing.
+   */
+  connectPeer: {
+    label: 'Connect',
+    needsSudo: true,
+    rehearse: (p) =>
+      `bash ${script('install/connect-peer.sh')} --from ${q(p.from)} --to ${q(p.to)} --dry-run`,
+    build: (p) => `bash ${script('install/connect-peer.sh')} --from ${q(p.from)} --to ${q(p.to)}`,
+  },
+
+  /**
+   * Undo it, and revoke rather than merely unlink.
+   *
+   * Leaving the caller's entry in the callee's bearer list would leave a live
+   * credential nothing accounts for — the objection `renameApp` raises about a name
+   * left behind in six places. The script refuses to remove the LAST bearer, because
+   * an empty key list makes agent-mcp-py fail closed: the callee would stop mounting
+   * its MCP server and drop out of the registry, which is a much larger act than
+   * unlinking one caller and not one to perform as a side effect.
+   */
+  disconnectPeer: {
+    label: 'Disconnect',
+    needsSudo: true,
+    rehearse: (p) =>
+      `bash ${script('install/connect-peer.sh')} --from ${q(p.from)} --to ${q(p.to)} --disconnect --dry-run`,
+    build: (p) =>
+      `bash ${script('install/connect-peer.sh')} --from ${q(p.from)} --to ${q(p.to)} --disconnect`,
   },
 
   deregister: {
