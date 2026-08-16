@@ -481,6 +481,25 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
    */
   ipcMain.handle(IPC.BLOOM_OAUTH_PENDING, () => takePendingDeepLink())
 
+  // --- the builder ----------------------------------------------------------
+  //
+  // No watch handler: a build is a run, so BLOOM_WATCH_RUN already covers it.
+
+  ipcMain.handle(IPC.BLOOM_BUILD, (_e, brief: string) => bloomApi.startBuild(emit, brief))
+  ipcMain.handle(
+    IPC.BLOOM_BUILDS,
+    (_e, params?: { limit?: number; offset?: number; status?: string }) =>
+      bloomApi.listBuilds(emit, params),
+  )
+  ipcMain.handle(IPC.BLOOM_BUILD_GET, (_e, buildId: string) => bloomApi.getBuild(emit, buildId))
+  ipcMain.handle(IPC.BLOOM_BUILD_STEP_DONE, (_e, buildId: string, index: number) =>
+    bloomApi.markStepDone(emit, buildId, index),
+  )
+  ipcMain.handle(IPC.BLOOM_BUILD_DELETE, (_e, buildId: string) =>
+    bloomApi.deleteBuild(emit, buildId),
+  )
+  ipcMain.handle(IPC.BLOOM_KEYWORDS, () => bloomApi.listKeywords(emit))
+
   // --- audit ----------------------------------------------------------------
 
   ipcMain.handle(IPC.AUDIT_LIST, () => listAudit())

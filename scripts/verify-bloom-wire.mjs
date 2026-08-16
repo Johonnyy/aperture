@@ -18,11 +18,14 @@ import {
   createSseParser,
   fromConnectionDraft,
   toAgentConfig,
+  toBuild,
   toConnection,
   toConnectionKinds,
+  toKeywords,
   toProbeResult,
   toRunEvent,
   toRunSummary,
+  toSetupSteps,
   toUsage,
   streamEvent,
 } from '../out/verify/bloom-wire.mjs'
@@ -308,6 +311,70 @@ check(
 // Negative, so a synthetic event can never collide with Bloom's autoincrement cursor
 // or be mistaken for a replayed real one by a dedup on id.
 check('synthetic stream events carry a negative id', streamEvent('r1', 'stream_lost', 'x').id < 0, true)
+
+console.log('\nbuilds — model output, so nothing here may be trusted as written\n')
+
+// The coercion that matters most, and the one Bloom performs identically at its own
+// end: a kind nobody has heard of still renders, just without a button. Dropping the
+// step instead would silently lose something a user has to do.
+check(
+  'an unknown step kind becomes manual rather than being dropped',
+  toSetupSteps([{ kind: 'teleport', title: 'Do a thing' }])[0].kind,
+  'manual',
+)
+check(
+  'a known kind survives',
+  toSetupSteps([{ kind: 'connect_oauth', title: 'Press Connect' }])[0].kind,
+  'connect_oauth',
+)
+// A button labelled with nothing is worse than no button.
+check('a step with no title is dropped', toSetupSteps([{ kind: 'manual', detail: 'x' }]).length, 0)
+check('a non-array checklist is empty, not a crash', toSetupSteps('nope'), [])
+
+// The one field that becomes an href. Bloom already refuses anything but http(s);
+// this is the second lock, because the URL came from a model reading a web page.
+check(
+  'a javascript: url is dropped',
+  toSetupSteps([{ kind: 'manual', title: 'Click', url: 'javascript:alert(1)' }])[0].url,
+  '',
+)
+check(
+  'an https url survives',
+  toSetupSteps([{ kind: 'manual', title: 'Click', url: 'https://example.com' }])[0].url,
+  'https://example.com',
+)
+
+// A spinner that never stops is the one outcome with no way out of it, so an
+// unrecognised status reads as failed rather than as still running.
+check('an unknown build status reads as failed', toBuild({ id: 'b', status: 'weird' }).status, 'failed')
+check(
+  'a known build status survives',
+  toBuild({ id: 'b', status: 'needs_setup' }).status,
+  'needs_setup',
+)
+check('a build with no id is null', toBuild({ status: 'ready' }), null)
+check('done is filtered to numbers', toBuild({ id: 'b', status: 'ready', done: [0, 'x', 2] }).done, [
+  0, 2,
+])
+
+console.log('\nmodel keywords\n')
+
+check(
+  'keywords map through with the overridden flag intact',
+  toKeywords({
+    keywords: [{ name: 'coding', model: 'a/b', description: 'd', builtin: true, overridden: true }],
+    shared: true,
+    default: 'balanced',
+  }).keywords[0].overridden,
+  true,
+)
+check('a nameless keyword is dropped', toKeywords({ keywords: [{ model: 'a/b' }] }).keywords, [])
+check('no sync store reads as not shared', toKeywords({ keywords: [] }).shared, false)
+
+// An agent from a Bloom built before the builder existed has no `builtin` field, and
+// false is the right reading: every agent there was written by a human.
+check('a missing builtin flag is false', toAgentConfig({ id: 'a1' }).builtin, false)
+check('a builtin agent is flagged', toAgentConfig({ id: 'a1', builtin: true }).builtin, true)
 
 console.log(failures === 0 ? '\nAll checks passed.\n' : `\n${failures} check(s) failed.\n`)
 process.exit(failures === 0 ? 0 : 1)

@@ -2,6 +2,9 @@ import type {
   AgentConfig,
   AgentConfigInput,
   BloomErrorCode,
+  BloomKeywords,
+  Build,
+  BuildStarted,
   Connection,
   ConnectionKinds,
   OAuthStart,
@@ -16,9 +19,13 @@ import {
   fromConnectionDraft,
   toAgentConfig,
   toAgentConfigs,
+  toBuild,
+  toBuildStarted,
+  toBuilds,
   toConnection,
   toConnectionKinds,
   toConnections,
+  toKeywords,
   toOAuthStart,
   toProbeResult,
   toRunEvents,
@@ -503,4 +510,79 @@ export async function usage(
   since?: string,
 ): Promise<BloomResult<UsageReport | null>> {
   return map(await request<unknown>(target, '/admin/usage', { query: { since } }), toUsage)
+}
+
+
+// --- the builder ------------------------------------------------------------
+//
+// A build is a run, so there is nothing here for watching one: `startBuild` hands
+// back a `runId` and `run-stream.ts` takes it from there, unchanged. What these add
+// is the durable half — the agent that came out and the steps still outstanding.
+
+export async function startBuild(
+  target: BloomTarget,
+  brief: string,
+): Promise<BloomResult<BuildStarted | null>> {
+  const result = await request<unknown>(target, '/admin/builder/build', {
+    method: 'POST',
+    body: { brief },
+    // A build is minutes of work, but this call only starts it: Bloom answers 202
+    // with the id and runs it in the background, so the default timeout is right.
+  })
+  return map(result, toBuildStarted)
+}
+
+export async function listBuilds(
+  target: BloomTarget,
+  options: { limit?: number; offset?: number; status?: string } = {},
+): Promise<BloomResult<Build[]>> {
+  const result = await request<unknown>(target, '/admin/builds', {
+    query: { limit: options.limit, offset: options.offset, status: options.status },
+  })
+  return map(result, toBuilds)
+}
+
+export async function getBuild(
+  target: BloomTarget,
+  buildId: string,
+): Promise<BloomResult<Build | null>> {
+  return map(
+    await request<unknown>(target, `/admin/builds/${encodeURIComponent(buildId)}`),
+    toBuild,
+  )
+}
+
+export async function markStepDone(
+  target: BloomTarget,
+  buildId: string,
+  index: number,
+): Promise<BloomResult<Build | null>> {
+  const result = await request<unknown>(
+    target,
+    `/admin/builds/${encodeURIComponent(buildId)}/steps/${index}/done`,
+    { method: 'POST' },
+  )
+  return map(result, toBuild)
+}
+
+export async function deleteBuild(
+  target: BloomTarget,
+  buildId: string,
+): Promise<BloomResult<void>> {
+  return request<void>(target, `/admin/builds/${encodeURIComponent(buildId)}`, {
+    method: 'DELETE',
+  })
+}
+
+/**
+ * What a keyword like `coding` resolves to on this Bloom.
+ *
+ * Read-only: the shared table is Amber's to edit. This exists so the agent editor
+ * can offer the real vocabulary instead of a hardcoded three, and say which entries
+ * this box has actually picked up from the sync store.
+ */
+export async function listKeywords(
+  target: BloomTarget,
+): Promise<BloomResult<BloomKeywords>> {
+  return map(await request<unknown>(target, '/admin/models/keywords'), toKeywords)
 }

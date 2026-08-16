@@ -4,7 +4,9 @@ import type {
   AgentConfig,
   AgentConfigInput,
   BloomErrorCode,
+  BloomKeywords,
   BloomLink,
+  Build,
   Connection,
   ConnectionDraft,
   ConnectionKinds,
@@ -359,6 +361,32 @@ const api = {
     /** Any `aperture://` handoff that arrived before this window was listening. */
     pendingOAuth: (): Promise<{ provider: string | null } | null> =>
       ipcRenderer.invoke(IPC.BLOOM_OAUTH_PENDING),
+
+    /**
+     * Describe an agent in plain language; Bloom researches and writes it.
+     *
+     * Returns as soon as Bloom has named the build — the work continues, and its
+     * trace arrives as ordinary `bloom-run` events under the returned `runId`,
+     * because a build *is* a run. Read the outcome with `build(buildId)`.
+     */
+    startBuild: (brief: string): Promise<BloomCall<{ buildId: string; runId: string }>> =>
+      ipcRenderer.invoke(IPC.BLOOM_BUILD, brief),
+    builds: (params?: {
+      limit?: number
+      offset?: number
+      status?: string
+    }): Promise<BloomCall<Build[]>> => ipcRenderer.invoke(IPC.BLOOM_BUILDS, params),
+    build: (buildId: string): Promise<BloomCall<Build | null>> =>
+      ipcRenderer.invoke(IPC.BLOOM_BUILD_GET, buildId),
+    /** Tick one setup step off. Idempotent; returns the whole build back. */
+    markStepDone: (buildId: string, index: number): Promise<BloomCall<Build | null>> =>
+      ipcRenderer.invoke(IPC.BLOOM_BUILD_STEP_DONE, buildId, index),
+    /** Forget a build. The agent it created, and its run history, survive. */
+    deleteBuild: (buildId: string): Promise<BloomCall<void>> =>
+      ipcRenderer.invoke(IPC.BLOOM_BUILD_DELETE, buildId),
+
+    /** What each model keyword resolves to on this Bloom. Read-only. */
+    keywords: (): Promise<BloomCall<BloomKeywords>> => ipcRenderer.invoke(IPC.BLOOM_KEYWORDS),
   },
 
   bridge: {

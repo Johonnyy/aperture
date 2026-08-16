@@ -136,6 +136,16 @@ export interface AgentConfig {
   maxCostUsd: number | null
   createdAt: string
   updatedAt: string
+  /**
+   * Defined in code rather than by a human — Bloom's own builder.
+   *
+   * Its prompt is re-seeded from git at every startup, so an edit here would appear
+   * to save and then vanish at the next restart. Bloom refuses those edits with a
+   * 409; a client should show the identity and prompt read-only rather than let
+   * someone discover that the hard way. The model keyword and the ceilings *are*
+   * editable, because those are genuinely this install's to choose.
+   */
+  builtin: boolean
 }
 
 /**
@@ -425,3 +435,111 @@ export interface UsageReport {
 export const USAGE_CAVEAT =
   'A run stopped by a step or cost ceiling makes one further model call that the ' +
   'runtime does not report, so spend is a floor rather than a total.'
+
+// --- model keywords ---------------------------------------------------------
+
+/**
+ * What a keyword like `coding` currently points at, on *this* Bloom.
+ *
+ * Read-only here. The shared table is Amber's to edit — Aperture sends her a
+ * `set_model` frame and she pushes to the sync store — and Bloom pulls from it.
+ * Showing Bloom's view still matters, because a Bloom with no sync store
+ * configured, or one that has not reached it since booting, resolves `coding` to
+ * its own built-in default rather than to whatever Amber currently means.
+ * `overridden` is the difference between the fleet agreeing and this box being on
+ * its own.
+ */
+export interface BloomKeyword {
+  name: string
+  model: string
+  description: string
+  builtin: boolean
+  overridden: boolean
+}
+
+export interface BloomKeywords {
+  keywords: BloomKeyword[]
+  /** Whether a shared table is configured at all. */
+  shared: boolean
+  default: string
+}
+
+// --- builds -----------------------------------------------------------------
+//
+// A build is a *run*, which is why nothing here needs a new transport: `runId`
+// points at the same SSE stream and the same trace renderer the test-run panel
+// already uses. What this adds is the durable half — the agent that came out, and
+// the list of things a human still has to do.
+
+export type BuildStatus =
+  | 'running'
+  /** It made something, and it cannot work until a human supplies a credential. */
+  | 'needs_setup'
+  /** Everything it attached is already live. A brief needing no service lands here. */
+  | 'ready'
+  /**
+   * Including the deliberate case: no usable MCP server and no shipped manifest,
+   * so the builder reported what it found and created nothing. Read `summary`.
+   */
+  | 'failed'
+
+/**
+ * The kinds of step a checklist can carry.
+ *
+ * Typed rather than prose so each one renders as the control that completes it —
+ * `connect_oauth` is the Connect button we already have, `paste_api_key` is the
+ * secret box. That is the whole reason the checklist is structured.
+ *
+ * **An unknown kind becomes `manual` rather than being dropped.** A model will
+ * eventually invent one, and losing its button is much better than losing the step.
+ * Bloom's `normalise_step` performs the identical coercion, so the two ends cannot
+ * disagree about what a stored checklist means.
+ */
+export const SETUP_STEP_KINDS = [
+  'register_oauth_app',
+  'set_client_credentials',
+  'connect_oauth',
+  'paste_api_key',
+  'set_env',
+  'manual',
+] as const
+
+export type SetupStepKind = (typeof SETUP_STEP_KINDS)[number]
+
+export interface SetupStep {
+  kind: SetupStepKind
+  title: string
+  detail: string
+  /** Always http(s) or empty — Bloom drops anything else before storing it. */
+  url: string
+  /** Which connection this step is about, when it is about one. */
+  connectionName: string
+  envName: string
+  doneWhen: string
+}
+
+export interface Build {
+  id: string
+  /** The run that produced it: the join to the live stream and the trace. */
+  runId: string
+  brief: string
+  agentConfigId: string | null
+  agentSlug: string
+  status: BuildStatus
+  summary: string
+  checklist: SetupStep[]
+  /** Indexes into `checklist` that have been ticked off. */
+  done: number[]
+  error: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface BuildStarted {
+  buildId: string
+  runId: string
+  status: string
+  /** Relative to the base URL — join, don't use directly. */
+  streamUrl: string
+  traceUrl: string
+}

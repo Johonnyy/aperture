@@ -4,6 +4,8 @@ import type {
   AgentConfig,
   AgentConfigInput,
   BloomErrorCode,
+  BloomKeywords,
+  Build,
   Connection,
   ConnectionKinds,
   ProbeResult,
@@ -233,3 +235,49 @@ export async function startOAuth(
 
 export const usage = (emit: Emit, since?: string): Promise<Result<UsageReport | null>> =>
   call(emit, (t) => api.usage(t, since))
+
+
+// --- the builder ------------------------------------------------------------
+
+/**
+ * Describe an agent; Bloom writes it.
+ *
+ * Mirrors `startTestRun` exactly, and that symmetry is the payoff for making a build
+ * a run: start it, then attach to the same stream the test-run panel uses. Nothing
+ * about the transport is new, so a build renders through `TraceView` unchanged and
+ * resumes over a dropped connection for free.
+ */
+export async function startBuild(
+  emit: Emit,
+  brief: string,
+): Promise<Result<{ buildId: string; runId: string }>> {
+  const started = await call(emit, (t) => api.startBuild(t, brief))
+  if (!started.ok) return started
+  const buildId = started.value?.buildId
+  const runId = started.value?.runId
+  if (!buildId || !runId) {
+    return { ok: false, code: 'transport', error: 'Bloom started a build but did not name it.' }
+  }
+  watchRun(emit, runId)
+  return { ok: true, value: { buildId, runId } }
+}
+
+export const listBuilds = (
+  emit: Emit,
+  params?: { limit?: number; offset?: number; status?: string },
+): Promise<Result<Build[]>> => call(emit, (t) => api.listBuilds(t, params ?? {}))
+
+export const getBuild = (emit: Emit, buildId: string): Promise<Result<Build | null>> =>
+  call(emit, (t) => api.getBuild(t, buildId))
+
+export const markStepDone = (
+  emit: Emit,
+  buildId: string,
+  index: number,
+): Promise<Result<Build | null>> => call(emit, (t) => api.markStepDone(t, buildId, index))
+
+export const deleteBuild = (emit: Emit, buildId: string): Promise<Result<void>> =>
+  call(emit, (t) => api.deleteBuild(t, buildId))
+
+export const listKeywords = (emit: Emit): Promise<Result<BloomKeywords>> =>
+  call(emit, (t) => api.listKeywords(t))

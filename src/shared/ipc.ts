@@ -117,4 +117,19 @@ export const IPC = {
   BLOOM_USAGE: 'bloom:usage',
   /** Pull a deep link that landed before the renderer was listening. */
   BLOOM_OAUTH_PENDING: 'bloom:oauth-pending',
+
+  /**
+   * The builder: describe an agent, and Bloom writes it.
+   *
+   * There is no `bloom:build-watch` here on purpose — a build *is* a run, so
+   * `BLOOM_WATCH_RUN` and the existing `bloom-run` event stream carry its trace
+   * with nothing added.
+   */
+  BLOOM_BUILD: 'bloom:build',
+  BLOOM_BUILDS: 'bloom:builds',
+  BLOOM_BUILD_GET: 'bloom:build-get',
+  BLOOM_BUILD_STEP_DONE: 'bloom:build-step-done',
+  BLOOM_BUILD_DELETE: 'bloom:build-delete',
+  /** What a model keyword resolves to on this Bloom. Read-only; Amber owns editing. */
+  BLOOM_KEYWORDS: 'bloom:keywords',
 } as const

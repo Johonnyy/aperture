@@ -5,6 +5,7 @@ import { SmallButton } from '../infra/parts'
 import { useStore } from '../store'
 import { AgentEditor } from './AgentEditor'
 import { AgentList } from './AgentList'
+import { BuildAgent } from './BuildAgent'
 import { ConnectionLibrary } from './ConnectionLibrary'
 import { Connections } from './Connections'
 import { RunHistory } from './RunHistory'
@@ -24,7 +25,7 @@ import { Usage } from './Usage'
  * from the sidebar, because a tab that disappears takes the fix with it.
  */
 
-type Tab = 'agents' | 'connections' | 'activity' | 'usage'
+type Tab = 'agents' | 'build' | 'connections' | 'activity' | 'usage'
 
 /**
  * The sections of one agent.
@@ -96,6 +97,9 @@ export function BloomView(): React.JSX.Element {
         <TabButton active={tab === 'agents'} onClick={() => setTab('agents')}>
           Agents
         </TabButton>
+        <TabButton active={tab === 'build'} onClick={() => setTab('build')}>
+          Build
+        </TabButton>
         <TabButton active={tab === 'connections'} onClick={() => setTab('connections')}>
           Connections
         </TabButton>
@@ -106,6 +110,11 @@ export function BloomView(): React.JSX.Element {
           Usage
         </TabButton>
       </div>
+
+      {/* Its own tab rather than a button on the agent list: a build is a run
+          that takes minutes and produces a checklist to work through, which is a
+          place you stay rather than a dialog you dismiss. */}
+      {tab === 'build' && <BuildAgent onBuilt={() => void refresh()} />}
 
       {tab === 'agents' &&
         (editing ? (

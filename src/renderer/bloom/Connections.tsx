@@ -10,6 +10,7 @@ import {
   type ConnectionKinds,
 } from '../../shared/bloom'
 import { Chip, Field, SmallButton } from '../infra/parts'
+import { AgentSetup } from './AgentSetup'
 
 /**
  * What an agent can act through.
@@ -122,6 +123,18 @@ export function Connections({ agent }: { agent: AgentConfig }): React.JSX.Elemen
           {error}
         </p>
       )}
+
+      {/* If this agent came out of the builder and is still waiting on a
+          credential, the steps belong here — this is where somebody looks when an
+          agent is not working. Renders nothing when there is nothing outstanding. */}
+      <AgentSetup
+        agent={agent}
+        connections={attached}
+        onConnect={(name) => {
+          const match = attached.find((c) => c.name === name)
+          if (match) void connect(match)
+        }}
+      />
 
       <div className="flex flex-wrap items-center gap-2">
         <p className="min-w-0 flex-1 text-xs text-muted">
