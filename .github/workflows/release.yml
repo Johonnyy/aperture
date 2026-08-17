@@ -1,0 +1,89 @@
+# Build Aperture on all three platforms and attach the installers to a GitHub release.
+#
+# Same trigger as every other repo in the ecosystem — a `v*` tag is what "set the
+# version" means here (see src/main/infra/releases.ts). What differs is the artifact:
+# the other repos publish a container image, this one publishes something a person
+# double-clicks.
+#
+# The release is created as a **draft**. A tag push builds and uploads; publishing is
+# still a button you press after downloading one of the artifacts and checking it runs.
+#
+# `workflow_dispatch` builds the same three artifacts without touching releases at
+# all, which is how you test a change to this file.
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write # electron-builder creates the draft release and uploads to it
+
+jobs:
+  # A tag that disagrees with package.json produces artifacts named after the wrong
+  # version — which is invisible until someone reports a bug against a build that
+  # does not exist. One grep is cheaper than that conversation.
+  version:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag must match package.json version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version $pkg"
+            exit 1
+          fi
+          echo "version $pkg"
+
+  build:
+    needs: [version]
+    # `always()` keeps this reachable on workflow_dispatch, where `version` is skipped.
+    if: always() && needs.version.result != 'failure'
+    strategy:
+      fail-fast: false # one platform failing should not hide whether the others work
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # The checks that already exist, before spending build minutes on packaging.
+      - run: npm run typecheck
+      - run: npm run verify
+
+      - run: npm run build
+
+      - name: Package
+        # Publish only from a tag. A dispatch run uploads to the workflow instead, so
+        # this file can be tested without inventing a version.
+        run: npx --no-install electron-builder --publish ${{ startsWith(github.ref, 'refs/tags/v') && 'always' || 'never' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # No signing identity exists yet. Without this, electron-builder searches the
+          # keychain on macOS and fails the build rather than shipping unsigned.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aperture-${{ matrix.os }}
+          path: |
+            release/*.exe
+            release/*.dmg
+            release/*.zip
+            release/*.AppImage
+            release/*.yml
+          if-no-files-found: warn
+          retention-days: 14

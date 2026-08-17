@@ -31,6 +31,64 @@ npm run typecheck    # tsc over main + renderer, no emit
 npm run build        # production bundles into out/
 ```
 
+## Installing it somewhere else
+
+`npm run build` stops at `out/` — JavaScript that still needs a checkout and a
+`node_modules` beside it. Installers come from electron-builder
+(`electron-builder.yml`):
+
+```bash
+npm run dist:dir     # unpacked app in release/, no installer — fastest way to check it launches
+npm run dist         # installer for this platform, into release/
+```
+
+Both refuse to publish (`--publish never`), so a local build can never reach GitHub
+by accident.
+
+A machine can only build for itself — a `.dmg` needs macOS — so the real build is
+`.github/workflows/release.yml`, a matrix over Windows, macOS and Linux. Cutting a
+release is a `v*` tag, the same convention the rest of the ecosystem uses:
+
+```bash
+npm version patch    # bumps package.json and tags
+git push --follow-tags
+```
+
+The workflow refuses a tag that disagrees with `package.json`, runs `typecheck` and
+`verify` before it packages anything, and uploads to a **draft** release. Publishing
+stays a button you press after downloading one of the artifacts and running it. From
+then on the download is `github.com/Johonnyy/aperture/releases`.
+
+**Three things this does not solve yet.**
+
+**Nothing is signed.** Windows shows a SmartScreen warning on first run ("Windows
+protected your PC" → More info → Run anyway) and macOS refuses to open the app at
+all until you right-click → Open, or clear the quarantine flag:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Aperture.app
+```
+
+Tolerable for your own machines, a wall for anyone else. The fix is an Apple
+Developer ID (notarization) and a Windows code-signing certificate, wired in through
+electron-builder's `CSC_*` environment variables.
+
+**If the repo is private, release assets need a token** — there is no plain download
+URL, only `gh release download`. Making it public is the cheaper answer given it is
+already MIT.
+
+**Updating is manual.** Downloading a new installer each time is the same class of
+problem as SSH-ing into a box: `electron-updater` reads the exact release feed this
+workflow already writes (`latest.yml`, and the macOS `zip` target exists for it), so
+it is a small follow-on rather than a redesign.
+
+Two smaller notes. The icon is generated, not drawn — `npm run icon` rasterizes
+Darkroom's palette into `build/icon.png` (see `scripts/make-icon.mjs`); replace that
+file with a designed 1024×1024 PNG and nothing else changes. And `npm run dev` and an
+installed Aperture cannot run at the same time: both resolve to the same userData
+directory on Windows, so the second one to start loses the single-instance lock and
+exits silently.
+
 ## How it's put together
 
 The WebSocket client lives in the **main** process, not the renderer. Three reasons:

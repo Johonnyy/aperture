@@ -1,0 +1,89 @@
+# How Aperture becomes something you can download.
+#
+# `npm run build` stops at `out/` — plain JS that only runs from a checkout with
+# node_modules beside it. This turns that into an installer per platform, and the
+# release workflow attaches them to a GitHub release.
+#
+#   npm run dist:dir    # unpacked app, fast, no installer — for checking it launches
+#   npm run dist        # installer for the host platform, into release/
+#
+# You cannot build every platform from one machine (a .dmg needs macOS), so the
+# matrix in .github/workflows/release.yml is the real build. Local `dist` is for
+# proving a change before spending a tag on it.
+
+appId: dev.johnny.aperture # must match `app.setAppUserModelId` in src/main/index.ts
+productName: Aperture
+copyright: Copyright © 2026 Johnny Patino
+
+directories:
+  output: release # gitignored
+  buildResources: build # where icon.png lives; see scripts/make-icon.mjs
+
+# Only what the app needs at runtime. electron-vite has already bundled the renderer
+# and preload; `dependencies` (ssh2, ws) stay unbundled by design — see the comment in
+# electron.vite.config.ts — so electron-builder pulls them from node_modules itself.
+files:
+  - out/**
+  - package.json
+
+# Native addons cannot be loaded from inside an asar. electron-builder detects most
+# of them, but ssh2 reaches for its crypto binding and cpu-features through plain
+# `require` in a try/catch — so a missed unpack degrades silently to the pure-JS
+# fallback instead of failing loudly. Naming them is cheaper than discovering that.
+asarUnpack:
+  - '**/*.node'
+  - '**/node_modules/cpu-features/**'
+  - '**/node_modules/ssh2/lib/protocol/crypto/**'
+
+# Bloom's OAuth callback returns through `aperture://`. In dev, `setAsDefaultProtocolClient`
+# registers it live; an installed app needs the scheme declared here as well — on macOS
+# it goes in Info.plist and there is no runtime substitute.
+protocols:
+  - name: Aperture
+    schemes:
+      - aperture
+
+# Version and platform in the filename, because a downloads folder with three
+# `Aperture Setup.exe` files in it is a support question waiting to happen.
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  # Unsigned. SmartScreen will warn on first run until there is a certificate —
+  # see the signing section of README.md.
+
+nsis:
+  oneClick: false # show the wizard rather than installing on double-click
+  perMachine: false # per-user install needs no admin prompt
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false # the safeStorage key vault lives in userData
+
+mac:
+  # macos-latest runners are arm64. Intel Macs need `macos-13` added to the release
+  # matrix — cross-arch rebuilding of ssh2's native binding is not worth the flakiness.
+  target:
+    - target: dmg
+      arch: [arm64]
+    - target: zip # what electron-updater consumes on macOS, if that lands later
+      arch: [arm64]
+  category: public.app-category.developer-tools
+  hardenedRuntime: true # inert until signed, correct once there is an identity
+
+linux:
+  # AppImage only, deliberately: it is the format that matches "download it and run
+  # it". A .deb additionally requires a maintainer email, which is a real address in
+  # a public repo — add it here consciously rather than by accepting a default.
+  target:
+    - target: AppImage
+      arch: [x64]
+  category: Development
+
+publish:
+  provider: github
+  owner: Johonnyy
+  repo: aperture
+  # Draft, so a tag push builds and uploads but publishing stays a decision you make
+  # in the GitHub UI after checking the artifacts.
+  releaseType: draft
