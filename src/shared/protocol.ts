@@ -382,6 +382,75 @@ export interface DeltaFrame {
   text: string
 }
 
+/** What sort of unprompted thing a `PushFrame` is. Route on this, not on `text`. */
+export type PushKind =
+  /** A reminder whose time arrived. `ref.reminder_id` points at the row. */
+  | 'reminder'
+  /** A note Amber's maintenance pass wrote about how conversations are going. */
+  | 'reflection'
+  /** Generic, submitted by another service through Amber's `POST /push`. */
+  | 'notice'
+  /** Something finished at a peer — a Bloom build, say. */
+  | 'peer_event'
+
+/**
+ * Amber, unprompted — the only frame in this protocol she originates herself.
+ *
+ * Every other server frame answers something we did. This one doesn't, and three
+ * consequences follow that no other frame has.
+ *
+ * **It is durable.** `memory`, `activity` and `delta` describe a turn in progress, so
+ * missing one costs nothing that outlives the turn. A push is held in an outbox until a
+ * client exists, because a reminder due while the app was closed still has to arrive.
+ * Pending ones are delivered right after the handshake.
+ *
+ * **Delivery is at-least-once and `id` is stable.** If Amber sends one and restarts
+ * before recording that she did, the same `id` arrives again on the next connect. So
+ * **dedupe on `id`** — treating each frame as a new event will show duplicates.
+ *
+ * **It never arrives mid-turn.** Amber holds pushes until the connection is idle, so
+ * one can't land between an `audio_chunk` and its bytes. Nothing to handle; it just
+ * means a push can lag a due time by a few seconds while she's talking.
+ */
+export interface PushFrame {
+  type: 'push'
+  /** Stable across redeliveries. Dedupe on this. */
+  id: string
+  kind: PushKind
+  text: string
+  /** Short heading, when the sender gave one. */
+  title?: string
+  /** When Amber queued it — which may be well before it was delivered. */
+  created_at?: string
+  /** The row behind it, so an ack can act on the thing rather than dismiss a card. */
+  ref?: { reminder_id?: number; reflection_id?: number; [key: string]: unknown }
+}
+
+/**
+ * Amber is about to run a tool that needs a person to say yes, and is blocked until
+ * one does.
+ *
+ * A *request*, like `tool_call` — we owe exactly one `confirm_response` carrying this
+ * `id`. Unlike `tool_call` the obligation is a human's, so this belongs in front of
+ * someone rather than in a log.
+ *
+ * **Silence is a refusal.** Not answering doesn't leave the turn hanging: Amber times
+ * out and tells the model the call wasn't approved. So a dialog that is dismissed, or
+ * a window that was never looked at, fails safe — but it also means an answer given
+ * long after the fact is discarded rather than belatedly running something.
+ */
+export interface ConfirmRequestFrame {
+  type: 'confirm_request'
+  /** Correlates with the `confirm_response` we send back. */
+  id: string
+  /** The tool name as the model called it, prefixed by convention. */
+  name: string
+  /** Who is asking — same vocabulary as `activity`, so we can say "Bloom wants to…". */
+  origin: ActivityOrigin
+  /** The arguments the model produced. Show these; they are what is being approved. */
+  input?: Record<string, unknown>
+}
+
 /** Something went wrong this turn. The connection stays open. */
 export interface ErrorFrame {
   type: 'error'
@@ -402,6 +471,8 @@ export type ServerFrame =
   | StatusFrame
   | VoiceFrame
   | ModelFrame
+  | PushFrame
+  | ConfirmRequestFrame
   | ErrorFrame
 
 // --- client -> server -------------------------------------------------------
@@ -496,6 +567,26 @@ export type ClientFrame =
    * retrieve it. Answered with a `memory` frame carrying `scope: 'browse'`.
    */
   | { type: 'memory_query'; q?: string | null; limit?: number }
+  /**
+   * Acknowledge a `push`. Optional — Amber settles the outbox on a successful send,
+   * so a client that never acks still receives everything exactly once in practice.
+   *
+   * `action` is what the person did. `complete` is the one that changes anything
+   * beyond the notification: it resolves the push's `ref` and calls the same store
+   * function `complete_reminder` does, so a reminder ticked off here and one ticked
+   * off by asking Amber are the same row. No acknowledgment comes back.
+   */
+  | { type: 'push_ack'; id: string; action?: 'seen' | 'dismiss' | 'complete' }
+  /**
+   * Answer a `confirm_request`. `id` **must** be the one from the request or Amber
+   * drops it silently, and it must arrive within `confirm_timeout_s` (60s) — after
+   * that the call has already been refused and a late yes does nothing.
+   *
+   * Not answering is equivalent to `approved: false`. Send it anyway when the user
+   * actually declines: a refusal tells the model not to raise it again, where a
+   * timeout tells it to ask.
+   */
+  | { type: 'confirm_response'; id: string; approved: boolean }
 
 // --- narrowing helpers ------------------------------------------------------
 
@@ -512,6 +603,10 @@ const SERVER_FRAME_TYPES = new Set<ServerFrame['type']>([
   'status',
   'voice',
   'model',
+  // Miss an entry here and the frame is dropped at the socket with no error anywhere
+  // — `isServerFrame` is the gate, and an unlisted type simply isn't one.
+  'push',
+  'confirm_request',
   'error',
 ])
 

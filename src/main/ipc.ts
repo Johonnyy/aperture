@@ -122,6 +122,24 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
       amber.send({ type: 'memory_query', q, limit }),
   )
 
+  // Acknowledging what Amber said unprompted. No reply comes back — she settles the
+  // outbox on a successful send, so this is about the *user's* verdict rather than
+  // delivery. `complete` is the only one that changes anything else, and it lands on
+  // the same row `complete_reminder` would.
+  ipcMain.handle(
+    IPC.AMBER_PUSH_ACK,
+    (_e, id: string, action?: 'seen' | 'dismiss' | 'complete'): boolean =>
+      amber.send({ type: 'push_ack', id, action }),
+  )
+
+  // A turn is blocked on this. Not answering is a refusal after 60s, so the dialog on
+  // the other end of it is the one thing in Aperture that genuinely holds Amber up.
+  ipcMain.handle(
+    IPC.AMBER_CONFIRM,
+    (_e, id: string, approved: boolean): boolean =>
+      amber.send({ type: 'confirm_response', id, approved }),
+  )
+
   ipcMain.handle(
     IPC.AMBER_MODEL_CATALOGUE,
     (_e, refresh?: boolean): Promise<CatalogueModel[]> => listModels(refresh === true),

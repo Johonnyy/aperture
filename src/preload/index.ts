@@ -99,6 +99,25 @@ const api = {
     memoryQuery: (q: string | null, limit?: number): Promise<boolean> =>
       ipcRenderer.invoke(IPC.AMBER_MEMORY_QUERY, q, limit),
     /**
+     * Acknowledge a `push`.
+     *
+     * `complete` does more than dismiss: it resolves what the push referred to and
+     * finishes it — the same row Amber would update if you'd simply asked her to.
+     */
+    pushAck: (
+      id: string,
+      action?: 'seen' | 'dismiss' | 'complete',
+    ): Promise<boolean> => ipcRenderer.invoke(IPC.AMBER_PUSH_ACK, id, action),
+    /**
+     * Answer a `confirm_request`. Amber's turn is blocked until this lands.
+     *
+     * Not answering is equivalent to declining after her timeout, so this is only
+     * ever needed to answer *sooner* — or to decline deliberately, which tells the
+     * model not to raise it again rather than to ask.
+     */
+    confirm: (id: string, approved: boolean): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.AMBER_CONFIRM, id, approved),
+    /**
      * Point a model keyword at a model — `null` resets it to Amber's default.
      *
      * Not a setting of this machine, which is why it is here and not under

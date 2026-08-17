@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 
 import { BloomView } from './bloom/BloomView'
 import { ChatView } from './chat/ChatView'
+import { ConfirmDialog } from './chat/ConfirmDialog'
+import { PushTray } from './chat/PushTray'
 import { useAmberConnection } from './chat/useAmberConnection'
 import { KeysView } from './keys/KeysView'
 import { Sidebar, useSidebarCollapsed, type View } from './nav/Sidebar'
@@ -64,6 +66,12 @@ export function App(): React.JSX.Element {
           <StatusPanel view={view} />
         </main>
       </div>
+
+      {/* Both at the root, and deliberately outside the view switch: a reminder that
+          fires while you are in Settings is exactly the case these exist for, and a
+          turn blocked on approval must not be hidden by whichever tab is open. */}
+      <PushTray />
+      <ConfirmDialog />
     </div>
   )
 }

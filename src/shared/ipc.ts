@@ -21,6 +21,10 @@ export const IPC = {
   AMBER_REMAP_MODEL: 'amber:remap-model',
   AMBER_MEMORY_ACTION: 'amber:memory-action',
   AMBER_MEMORY_QUERY: 'amber:memory-query',
+  /** Acknowledge an unprompted `push` — and, for `complete`, act on what it refers to. */
+  AMBER_PUSH_ACK: 'amber:push-ack',
+  /** Answer a `confirm_request`. Amber is blocked on this until it arrives or times out. */
+  AMBER_CONFIRM: 'amber:confirm',
   /** OpenRouter's public model list, to suggest ids for the field above. */
   AMBER_MODEL_CATALOGUE: 'amber:model-catalogue',
 

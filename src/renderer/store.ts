@@ -3,8 +3,10 @@ import { create } from 'zustand'
 import { EMPTY_BLOOM_LINK, type BloomLink, type BloomRunEvent } from '../shared/bloom'
 import type {
   ActivityOrigin,
+  ConfirmRequestFrame,
   MemoryFact,
   ModelFrame,
+  PushFrame,
   ServerFrame,
   StatusFrame,
   VoiceFrame,
@@ -173,6 +175,21 @@ interface State {
   trace: TraceEntry[]
   audit: AuditEntry[]
   pendingApprovals: PendingApproval[]
+  /**
+   * Unprompted messages from Amber — a fired reminder, a maintenance note, a build
+   * that finished. Newest first, and deduped on `id`: delivery is at-least-once, so
+   * the same push can legitimately arrive twice across a reconnect.
+   */
+  pushes: PushFrame[]
+  /**
+   * The tool call Amber is blocked on, waiting for a yes or no. At most one — she
+   * runs tool calls sequentially, so a second cannot arrive while this is open.
+   *
+   * Distinct from `pendingApprovals`, which is the SSH bridge's own queue. Same word,
+   * different mechanism, and conflating them would put a shell command and a peer
+   * agent's request through one UI that suits neither.
+   */
+  confirmRequest: ConfirmRequestFrame | null
   /** Keyed by operation id; see `OpLog`. */
   ops: Record<string, OpLog>
   thinking: boolean
@@ -215,6 +232,10 @@ interface State {
   setAudit: (entries: AuditEntry[]) => void
   addUserMessage: (text: string) => void
   clearError: () => void
+  /** Drop one push from the list once the user has dealt with it. */
+  dismissPush: (id: string) => void
+  /** Clear the open approval. Called after answering, and on disconnect. */
+  clearConfirmRequest: () => void
   /** Open a log before the work starts, so no early step can be missed. */
   startOp: (opId: string) => void
   /**
@@ -231,6 +252,9 @@ interface State {
 const TRACE_CAP = 400
 // Enough for a long session's chart without letting it grow forever.
 const TURN_STATS_CAP = 200
+// Unprompted messages are read and dismissed rather than scrolled, so this is a
+// backstop against an unattended app accumulating forever, not a real limit.
+const PUSH_CAP = 100
 
 let seq = 0
 const nextId = (): string => `${Date.now()}-${++seq}`
@@ -257,6 +281,8 @@ export const useStore = create<State>((set) => ({
   trace: [],
   audit: [],
   pendingApprovals: [],
+  pushes: [],
+  confirmRequest: null,
   ops: {},
   thinking: false,
   awaitingResponse: false,
@@ -276,6 +302,8 @@ export const useStore = create<State>((set) => ({
   setAudit: (audit) => set({ audit }),
   setBloomLink: (bloomLink) => set({ bloomLink }),
   clearError: () => set({ lastError: null }),
+  dismissPush: (id) => set((s) => ({ pushes: s.pushes.filter((p) => p.id !== id) })),
+  clearConfirmRequest: () => set({ confirmRequest: null }),
 
   /**
    * Fill a run's bucket from a historical trace.
@@ -717,6 +745,24 @@ function reduceFrame(s: State, frame: ServerFrame): Partial<State> {
         trace: push(
           trace('info', 'model', `${frame.settings.keyword} → ${frame.settings.model}`),
         ),
+      }
+
+    case 'push': {
+      // Deduped on `id` because delivery is at-least-once: if Amber sends one and
+      // restarts before recording that she did, the same push arrives again on the
+      // next connect. Without this the user sees the reminder twice and concludes
+      // reminders are broken.
+      if (s.pushes.some((p) => p.id === frame.id)) return {}
+      return {
+        pushes: [frame, ...s.pushes].slice(0, PUSH_CAP),
+        trace: push(trace('info', `push (${frame.kind})`, frame.text)),
+      }
+    }
+
+    case 'confirm_request':
+      return {
+        confirmRequest: frame,
+        trace: push(trace('info', `approval needed: ${frame.name}`, frame.origin)),
       }
 
     case 'error':
