@@ -5,6 +5,7 @@ import type { MemoryFact } from '../../shared/protocol'
 import { cn } from '../cn'
 import { useStore } from '../store'
 import { Meter } from '../viz/primitives'
+import { lifecycleOf } from './fact-lifecycle'
 
 /**
  * What Amber remembers, and the ability to change it.
@@ -139,6 +140,11 @@ function FactRow({ fact }: { fact: MemoryFact }): React.JSX.Element {
             </span>
           )}
         </div>
+        <Lifecycle fact={fact} />
+        {/* A fact that replaced an earlier one has a history, and until now nobody
+            could see it — `superseded_by` has been written on every correction since
+            tiering landed and read by nothing at all. */}
+        {fact.superseded_by != null && <Lineage factId={fact.id} />}
       </div>
 
       <button
@@ -150,6 +156,66 @@ function FactRow({ fact }: { fact: MemoryFact }): React.JSX.Element {
         <Trash2 className="size-3" />
       </button>
     </li>
+  )
+}
+
+/**
+ * What is about to happen to this fact.
+ *
+ * `tier: short` on its own says nothing anyone would act on. "Forgotten in about 4
+ * days unless used" does — it makes the self-curation visible instead of leaving it as
+ * machinery that silently drops things.
+ */
+function Lifecycle({ fact }: { fact: MemoryFact }): React.JSX.Element | null {
+  const policy = useStore((s) => s.status?.memory?.policy)
+  const state = lifecycleOf(fact, policy)
+  if (!state.summary) return null
+
+  return (
+    <p
+      className={cn('mt-0.5 text-nano', state.atRisk ? 'text-warn' : 'text-muted')}
+      title={
+        state.promoteInUses
+          ? `${state.promoteInUses} more use(s) and Amber keeps this for good`
+          : undefined
+      }
+    >
+      {state.summary}
+    </p>
+  )
+}
+
+/** One fact's revision history, fetched on demand and rendered as a chain. */
+function Lineage({ factId }: { factId: number }): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const chain = useStore((s) => s.memoryLineage)
+  const mine = open && chain.some((f) => f.id === factId)
+
+  return (
+    <div className="mt-0.5">
+      <button
+        type="button"
+        onClick={() => {
+          setOpen(true)
+          void window.aperture.amber.memoryScope('lineage', factId)
+        }}
+        className="text-nano text-muted underline-offset-2 transition hover:text-ink hover:underline"
+      >
+        {mine ? 'history' : 'show history'}
+      </button>
+      {mine && (
+        <ol className="mt-1 flex flex-col gap-0.5 border-l border-line pl-2">
+          {chain.map((step, i) => (
+            <li key={step.id} className="text-nano text-muted">
+              {i > 0 && <span className="text-accent">→ </span>}
+              <span className={step.status === 'active' ? 'text-ink/80' : undefined}>
+                {step.content}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </div>
   )
 }
 

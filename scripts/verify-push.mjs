@@ -40,6 +40,7 @@ const SERVER_FRAMES = [
   'model',
   'push',
   'confirm_request',
+  'review',
   'error',
 ]
 
@@ -67,6 +68,9 @@ const CLIENT_FRAMES = [
   'memory_query',
   'push_ack',
   'confirm_response',
+  'review_query',
+  'review_action',
+  'eval_capture',
 ]
 if (new Set(CLIENT_FRAMES).size !== CLIENT_FRAMES.length) {
   fail('duplicate client frame type in the list')

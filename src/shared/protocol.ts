@@ -92,6 +92,25 @@ export interface TurnCompleteFrame {
   cost_usd?: number
   /** The model that actually answered — the keyword table can move between turns. */
   model?: string
+  /**
+   * Where the turn's *time* went. `total_ms` is always present; the rest appear only
+   * when this turn did that thing — a typed turn does no STT, the canned reprompt
+   * path never reaches the model.
+   *
+   * **There is deliberately no `tools_ms`.** Every tool call already arrived as an
+   * `activity` pair carrying its own `ms`, so the server measuring it again would be
+   * two sources for one number. The waterfall is drawn from both halves.
+   */
+  timings?: {
+    total_ms: number
+    stt_ms?: number
+    /** Turn start to the first *text* — a turn that ran three tools first waited. */
+    first_token_ms?: number
+    /** Summed across sentences, not a window: synthesis interleaves with generation. */
+    tts_ms?: number
+  }
+  /** When each model call ran. ISO strings, straight off the runtime's own steps. */
+  step_spans?: { started_at: string; finished_at: string; model: string }[]
 }
 
 /** One remembered fact, as much of it as rides on the wire. */
@@ -112,6 +131,16 @@ export interface MemoryFact {
    * pass. Worth showing — the three deserve different confidence from a reader.
    */
   source?: 'extracted' | 'explicit' | 'consolidated'
+  /**
+   * When it was first learned. The only clock a **never-used** fact has — and that is
+   * exactly the fact a decay countdown is about, since the deadline is measured from
+   * `last_used_at` when there is one and `created_at` when there isn't.
+   */
+  created_at?: string
+  /** `active` unless this came from an archive or lineage read. */
+  status?: 'active' | 'superseded' | 'forgotten'
+  /** The fact that replaced this one. The revision history, finally readable. */
+  superseded_by?: number | null
 }
 
 /**
@@ -127,8 +156,14 @@ export interface MemoryFrame {
   items: string[]
   /** Absent on an Amber that predates the richer records. */
   facts?: MemoryFact[]
-  /** Absent means `turn` — the original meaning, unchanged. */
-  scope?: 'turn' | 'browse'
+  /**
+   * Absent means `turn` — the original meaning, unchanged.
+   *
+   * `lineage` is one fact's revision history, oldest first; `archive` is what Amber
+   * no longer believes. Both read columns that have always been written and never
+   * read, and both ride this frame so an older client just sees a fact list.
+   */
+  scope?: 'turn' | 'browse' | 'lineage' | 'archive'
   /** Active facts in total, so a browse can say what it is a slice of. */
   total?: number
   /** Settles a `memory_action`. Present even when it was refused. */
@@ -171,7 +206,25 @@ export interface StatusFrame {
     last_error?: string | null
     pending?: number
   }
-  memory?: { facts?: number }
+  memory?: {
+    facts?: number
+    /** Counts that have always been one keyword argument away and never asked for. */
+    forgotten?: number
+    superseded?: number
+    /**
+     * Amber's fact lifecycle, so a countdown isn't computed from hardcoded numbers
+     * that go quietly wrong on an install that tuned them.
+     */
+    policy?: {
+      short_ttl_days: number
+      session_ttl_hours: number
+      promote_uses: number
+      /** A short fact used this often stops decaying — but is still not durable. */
+      decay_immune_uses: number
+      /** Decay happens on the maintenance pass, not the instant a deadline passes. */
+      pass_interval_s: number
+    }
+  }
   features?: Record<string, boolean>
 }
 
@@ -451,6 +504,63 @@ export interface ConfirmRequestFrame {
   input?: Record<string, unknown>
 }
 
+/** Per-tool reliability over a window. One row per tool, worst first. */
+export interface ToolHealth {
+  name: string
+  calls: number
+  errors: number
+  /** 0..1. Calls with a recorded failure count against it; unknown outcomes don't. */
+  ok_rate: number
+  /** Nearest-rank, matching what the MCP usage layer reports for its own table. */
+  p50_ms: number
+  p95_ms: number
+  max_ms: number
+}
+
+/** One self-review note from the maintenance pass. */
+export interface Reflection {
+  id: number
+  note: string
+  created_at: string
+  /** The telemetry window it was drawn from — written since day one, shown nowhere. */
+  period_start?: string | null
+  period_end?: string | null
+  kind?: string
+  dismissed?: number
+}
+
+/** A turn that went wrong, kept so it can be replayed. */
+export interface EvalCase {
+  id: number
+  query: string
+  expect_tool?: string | null
+  got_tool?: string | null
+  note?: string | null
+  reply?: string | null
+  created_at: string
+  status: string
+}
+
+/**
+ * How Amber is doing. Answers a `review_query`.
+ *
+ * One frame for three panels, shaped like `memory` because it is the same kind of
+ * thing: a browse with a couple of verbs on what comes back. Everything in it has
+ * always been recorded and shown to nobody — tool latency fed one LLM prompt, the
+ * reflections needed an MCP key to read, and eval cases had nowhere to live.
+ *
+ * Advisory: a client that ignores it loses three panels, not a turn.
+ */
+export interface ReviewFrame {
+  type: 'review'
+  topic: 'tools' | 'reflections' | 'evals'
+  items: ToolHealth[] | Reflection[] | EvalCase[]
+  /** Window start for `tools`, so the board can say what it is a slice of. */
+  since?: string
+  /** Settles a `review_action`. Present even when it was refused. */
+  ack?: { action: string; id: number; ok: boolean; detail?: string }
+}
+
 /** Something went wrong this turn. The connection stays open. */
 export interface ErrorFrame {
   type: 'error'
@@ -473,6 +583,7 @@ export type ServerFrame =
   | ModelFrame
   | PushFrame
   | ConfirmRequestFrame
+  | ReviewFrame
   | ErrorFrame
 
 // --- client -> server -------------------------------------------------------
@@ -566,7 +677,14 @@ export type ClientFrame =
    * on. Without this a fact could only be deleted on a turn that happened to
    * retrieve it. Answered with a `memory` frame carrying `scope: 'browse'`.
    */
-  | { type: 'memory_query'; q?: string | null; limit?: number }
+  | {
+      type: 'memory_query'
+      q?: string | null
+      limit?: number
+      /** `lineage` needs `id`; `archive` takes none. Absent means the usual browse. */
+      scope?: 'lineage' | 'archive'
+      id?: number
+    }
   /**
    * Acknowledge a `push`. Optional — Amber settles the outbox on a successful send,
    * so a client that never acks still receives everything exactly once in practice.
@@ -587,6 +705,45 @@ export type ClientFrame =
    * timeout tells it to ask.
    */
   | { type: 'confirm_response'; id: string; approved: boolean }
+  /**
+   * Ask how Amber is doing. Answered with a `review` frame carrying the same topic.
+   * `since` is an ISO timestamp for the `tools` window; omitted, the server uses its
+   * configured default.
+   */
+  | {
+      type: 'review_query'
+      topic: 'tools' | 'reflections' | 'evals'
+      since?: string
+      limit?: number
+    }
+  /**
+   * Act on one reviewed item. `promote` turns a reflection into a durable fact — which
+   * is the whole reason `AMBER_FEATURE_SELF_NOTES` can stay off: the note is kept
+   * because *a person* chose to keep it, not because the model edited its own prompt.
+   * Answered with a `review` frame carrying `ack`.
+   */
+  | {
+      type: 'review_action'
+      topic: 'tools' | 'reflections' | 'evals'
+      action: 'promote' | 'dismiss' | 'archive'
+      id: number
+    }
+  /**
+   * Save the turn you are looking at as a regression case.
+   *
+   * Carries the whole case rather than a pointer into Amber's exchange log: that table
+   * has no session id and pairs user with assistant positionally, so a reference into
+   * it could quietly come to mean a different conversation. Answered with a `review`
+   * frame for the `evals` topic.
+   */
+  | {
+      type: 'eval_capture'
+      query: string
+      expect_tool?: string
+      got_tool?: string
+      note?: string
+      reply?: string
+    }
 
 // --- narrowing helpers ------------------------------------------------------
 
@@ -607,6 +764,7 @@ const SERVER_FRAME_TYPES = new Set<ServerFrame['type']>([
   // — `isServerFrame` is the gate, and an unlisted type simply isn't one.
   'push',
   'confirm_request',
+  'review',
   'error',
 ])
 

@@ -5,7 +5,9 @@ import { useStore } from '../store'
 import { ActivityCard, isBloomBuild } from './ActivityCard'
 import { Composer } from './Composer'
 import { MessageBubble } from './MessageBubble'
+import { Provenance } from './Provenance'
 import { RunInline } from './RunInline'
+import { TurnWaterfall } from './TurnWaterfall'
 import type { useAmberConnection } from './useAmberConnection'
 
 type Amber = ReturnType<typeof useAmberConnection>
@@ -57,6 +59,20 @@ export function ChatView({ amber }: { amber: Amber }): React.JSX.Element {
               >
                 {item.kind === 'message' ? (
                   <MessageBubble message={item} />
+                ) : item.kind === 'turn' ? (
+                  <div className="flex flex-col gap-1">
+                    <Provenance
+                      query={item.query}
+                      reply={item.reply}
+                      facts={item.facts}
+                      tools={item.tools}
+                    />
+                    <TurnWaterfall
+                      timings={item.timings}
+                      tools={item.tools}
+                      turnStart={item.startedAt}
+                    />
+                  </div>
                 ) : (
                   <ActivityCard activity={item}>
                     {isBloomBuild(item.name) && <RunInline runId={item.runId} />}
@@ -112,6 +128,9 @@ function hasOpenWork(timeline: ReturnType<typeof useStore.getState>['timeline'])
   const last = timeline.at(-1)
   if (!last) return false
   if (last.kind === 'activity') return last.running
+  // A turn mark is only ever appended once the turn has finished, so seeing one last
+  // means there is nothing open.
+  if (last.kind === 'turn') return false
   return last.role === 'amber' && Boolean(last.streaming)
 }
 

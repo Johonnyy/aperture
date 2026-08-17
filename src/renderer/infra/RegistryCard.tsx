@@ -5,6 +5,7 @@ import { SYNC_STORE_IMAGE_SCHEMA, type InfraStatus } from '../../shared/types'
 import { compareVersions, tagOf, type ReleaseInfo } from '../../shared/version'
 import { Card, Chip, Field, SmallButton } from './parts'
 import { PeerLinks } from './PeerLinks'
+import { useStore } from '../store'
 import { layoutOf } from './registry-layout'
 import { RegistryMap } from './RegistryMap'
 import type { Params } from './useRunner'
@@ -43,6 +44,24 @@ export function RegistryCard({
   release?: ReleaseInfo
 }): React.JSX.Element {
   const [activeId, setActiveId] = useState<string | null>(null)
+  // Which peers Amber is calling right now. Derived from the chat timeline, which is
+  // a global store — the Infra view is SSH-status driven and knows nothing about the
+  // conversation, but the peer name in `peer:<name>` is the same string the registry
+  // labels a node with, so the two join with no plumbing at all.
+  //
+  // Selected as the timeline and reduced in a memo, deliberately: a selector that
+  // built the Set itself would return a fresh reference on every store change, and
+  // zustand compares with Object.is — so the component would re-render forever.
+  const timeline = useStore((s) => s.timeline)
+  const flows = useMemo(() => {
+    const live = new Set<string>()
+    for (const item of timeline) {
+      if (item.kind === 'activity' && item.running && item.origin.startsWith('peer:')) {
+        live.add(item.origin.slice(5))
+      }
+    }
+    return live
+  }, [timeline])
   const [width, setWidth] = useState(640)
   const frame = useRef<HTMLDivElement>(null)
 
@@ -83,6 +102,7 @@ export function RegistryCard({
             map={map}
             layout={layout}
             activeId={activeId}
+            flows={flows}
             onHover={setActiveId}
             onSelect={setActiveId}
           />

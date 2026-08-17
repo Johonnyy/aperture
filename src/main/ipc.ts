@@ -122,6 +122,15 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
       amber.send({ type: 'memory_query', q, limit }),
   )
 
+  // The same frame under a different scope: a fact's revision history, or everything
+  // she has stopped believing. Both read columns that have always been written and,
+  // until now, read by nothing.
+  ipcMain.handle(
+    IPC.AMBER_MEMORY_SCOPE,
+    (_e, scope: 'lineage' | 'archive', id?: number, limit?: number): boolean =>
+      amber.send({ type: 'memory_query', scope, id, limit }),
+  )
+
   // Acknowledging what Amber said unprompted. No reply comes back — she settles the
   // outbox on a successful send, so this is about the *user's* verdict rather than
   // delivery. `complete` is the only one that changes anything else, and it lands on
@@ -138,6 +147,33 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
     IPC.AMBER_CONFIRM,
     (_e, id: string, approved: boolean): boolean =>
       amber.send({ type: 'confirm_response', id, approved }),
+  )
+
+  // How Amber is doing. Like the memory panel above, there is no optimistic local
+  // copy: Amber owns the numbers and answers with a `review` frame carrying what is
+  // actually true, so the panel renders the reply rather than its own guess.
+  ipcMain.handle(
+    IPC.AMBER_REVIEW_QUERY,
+    (_e, topic: 'tools' | 'reflections' | 'evals', since?: string, limit?: number): boolean =>
+      amber.send({ type: 'review_query', topic, since, limit }),
+  )
+
+  ipcMain.handle(
+    IPC.AMBER_REVIEW_ACTION,
+    (
+      _e,
+      topic: 'tools' | 'reflections' | 'evals',
+      action: 'promote' | 'dismiss' | 'archive',
+      id: number,
+    ): boolean => amber.send({ type: 'review_action', topic, action, id }),
+  )
+
+  ipcMain.handle(
+    IPC.AMBER_EVAL_CAPTURE,
+    (
+      _e,
+      payload: { query: string; expect_tool?: string; got_tool?: string; note?: string; reply?: string },
+    ): boolean => amber.send({ type: 'eval_capture', ...payload }),
   )
 
   ipcMain.handle(

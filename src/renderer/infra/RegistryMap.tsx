@@ -117,12 +117,22 @@ export function RegistryMap({
   map,
   layout,
   activeId,
+  flows,
   onHover,
   onSelect,
 }: {
   map: RegistryDiagnosis
   layout: Layout
   activeId: string | null
+  /**
+   * Peers Amber is calling *right now*, by name.
+   *
+   * The map has always shown what the registry believes; this is the only channel
+   * that shows it doing something. Everything needed was already in the store —
+   * `Activity.origin` is `peer:<name>` and `<name>` is the same string as the node's
+   * label — so a live edge costs one prop and no new frame.
+   */
+  flows?: ReadonlySet<string>
   onHover: (id: string | null) => void
   onSelect: (id: string) => void
 }): React.JSX.Element {
@@ -191,7 +201,13 @@ export function RegistryMap({
         if (!node) return null
         const joined = node.link === 'live' || node.link === 'stale'
         const active = activeId === node.id
-        const dim = activeId !== null && !active
+        // In flight right now. Matched on the node's label rather than its id,
+        // because the label is the peer name Amber uses in `peer:<name>` — the same
+        // string on both sides, which is what makes this need no new plumbing.
+        const busy = flows?.has(node.label) ?? false
+        // A busy peer stays lit even while something else is hovered: the point of
+        // the live channel is that it draws the eye without being pointed at.
+        const dim = activeId !== null && !active && !busy
         return (
           <g
             key={node.id}
@@ -208,7 +224,7 @@ export function RegistryMap({
                 active
                   ? '[stroke-width:calc(var(--stroke)*2)]'
                   : '[stroke-width:var(--stroke)]'
-              } ${active && node.link === 'live' ? 'animate-registry-flow [stroke-dasharray:4_4]' : ''}`}
+              } ${busy || (active && node.link === 'live') ? 'animate-registry-flow [stroke-dasharray:4_4]' : ''}`}
             />
             <rect
               x={box.x}

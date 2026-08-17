@@ -21,10 +21,18 @@ export const IPC = {
   AMBER_REMAP_MODEL: 'amber:remap-model',
   AMBER_MEMORY_ACTION: 'amber:memory-action',
   AMBER_MEMORY_QUERY: 'amber:memory-query',
+  /** One fact's revision history, or the archive of what Amber no longer believes. */
+  AMBER_MEMORY_SCOPE: 'amber:memory-scope',
   /** Acknowledge an unprompted `push` — and, for `complete`, act on what it refers to. */
   AMBER_PUSH_ACK: 'amber:push-ack',
   /** Answer a `confirm_request`. Amber is blocked on this until it arrives or times out. */
   AMBER_CONFIRM: 'amber:confirm',
+  /** Ask how Amber is doing: tool reliability, self-review notes, saved eval cases. */
+  AMBER_REVIEW_QUERY: 'amber:review-query',
+  /** Promote or dismiss a reflection; archive an eval case. */
+  AMBER_REVIEW_ACTION: 'amber:review-action',
+  /** Save the turn on screen as a regression case. */
+  AMBER_EVAL_CAPTURE: 'amber:eval-capture',
   /** OpenRouter's public model list, to suggest ids for the field above. */
   AMBER_MODEL_CATALOGUE: 'amber:model-catalogue',
 

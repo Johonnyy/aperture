@@ -4,11 +4,16 @@ import { EMPTY_BLOOM_LINK, type BloomLink, type BloomRunEvent } from '../shared/
 import type {
   ActivityOrigin,
   ConfirmRequestFrame,
+  EvalCase,
   MemoryFact,
   ModelFrame,
   PushFrame,
+  Reflection,
+  ReviewFrame,
   ServerFrame,
+  ToolHealth,
   StatusFrame,
+  TurnCompleteFrame,
   VoiceFrame,
 } from '../shared/protocol'
 import type {
@@ -99,9 +104,38 @@ export interface TurnStats {
   model: string
 }
 
+/**
+ * A finished turn's latency profile, appended when `turn_complete` lands.
+ *
+ * In the timeline rather than a parallel array because it annotates a specific stretch
+ * of the conversation — the same reason messages and tool calls share one list. It
+ * carries the tool spans it was built from, so the waterfall doesn't have to walk
+ * backwards through the timeline to find them at render time.
+ */
+export interface TurnMark {
+  id: string
+  ts: number
+  timings?: TurnCompleteFrame['timings']
+  tools: { name: string; origin: ActivityOrigin; ts: number; ms?: number; result?: string }[]
+  /** Client timestamp the turn began — the preceding user message. */
+  startedAt: number
+  /**
+   * What the turn was asked, what it answered, and the facts it drew on —
+   * **snapshotted**, not read live.
+   *
+   * `memoryFacts` holds only the *current* turn's facts and is replaced on the next
+   * one, so a provenance row that read the store would quietly start explaining an
+   * old answer with new evidence.
+   */
+  query: string
+  reply: string
+  facts: MemoryFact[]
+}
+
 export type TimelineItem =
   | ({ kind: 'message' } & Message)
   | ({ kind: 'activity' } & Activity)
+  | ({ kind: 'turn' } & TurnMark)
 
 /** The most recent message, skipping any tool calls that landed after it. */
 export function lastMessage(timeline: TimelineItem[]): Message | null {
@@ -113,6 +147,63 @@ export function lastMessage(timeline: TimelineItem[]): Message | null {
 }
 
 /** The reply still being streamed, if there is one. */
+/**
+ * Build the latency mark for a turn that has just finished.
+ *
+ * Walks back to the turn's own beginning — the last user message, or the previous
+ * turn mark if the user never spoke (a continuation) — and collects the tool calls in
+ * between. Doing it here rather than at render time means the waterfall is a pure
+ * function of its props and doesn't re-scan a growing timeline on every paint.
+ */
+function turnMark(
+  timeline: TimelineItem[],
+  frame: TurnCompleteFrame,
+  facts: MemoryFact[],
+): TimelineItem {
+  let startedAt = timeline[0]?.ts ?? Date.now()
+  const tools: TurnMark['tools'] = []
+  let query = ''
+  let reply = ''
+
+  for (let i = timeline.length - 1; i >= 0; i--) {
+    const item = timeline[i]
+    if (item.kind === 'turn') {
+      startedAt = item.ts
+      break
+    }
+    if (item.kind === 'message') {
+      if (item.role === 'user') {
+        query = item.text
+        startedAt = item.ts
+        break
+      }
+      if (!reply) reply = item.raw || item.text
+      continue
+    }
+    if (item.kind === 'activity') {
+      tools.unshift({
+        name: item.name,
+        origin: item.origin,
+        ts: item.ts,
+        ms: item.ms,
+        result: item.result,
+      })
+    }
+  }
+
+  return {
+    kind: 'turn',
+    id: `turn-${Date.now()}-${timeline.length}`,
+    ts: Date.now(),
+    timings: frame.timings,
+    tools,
+    startedAt,
+    query,
+    reply,
+    facts,
+  }
+}
+
 function streamingReply(timeline: TimelineItem[]): Message | null {
   const last = lastMessage(timeline)
   return last?.role === 'amber' && last.streaming ? last : null
@@ -190,6 +281,30 @@ interface State {
    * agent's request through one UI that suits neither.
    */
   confirmRequest: ConfirmRequestFrame | null
+  /**
+   * How Amber is doing, per topic. Kept apart rather than in one list because the
+   * three answer different questions and a panel showing one must not be cleared by
+   * a query for another.
+   *
+   * All of it is data she has always recorded and never showed anyone.
+   */
+  review: {
+    tools: ToolHealth[]
+    reflections: Reflection[]
+    evals: EvalCase[]
+    /** The window `tools` covers, so the board can say what it is a slice of. */
+    since: string | null
+    /** Settles the last promote/dismiss/archive. */
+    ack: ReviewFrame['ack'] | null
+  }
+  /**
+   * One fact's revision history, when a panel asked for it. Separate from
+   * `memoryBrowse` for the same reason `browse` is separate from the per-turn facts:
+   * they answer different questions and one must not overwrite the other.
+   */
+  memoryLineage: MemoryFact[]
+  /** What Amber no longer believes — forgotten and superseded together. */
+  memoryArchive: MemoryFact[]
   /** Keyed by operation id; see `OpLog`. */
   ops: Record<string, OpLog>
   thinking: boolean
@@ -283,6 +398,9 @@ export const useStore = create<State>((set) => ({
   pendingApprovals: [],
   pushes: [],
   confirmRequest: null,
+  review: { tools: [], reflections: [], evals: [], since: null, ack: null },
+  memoryLineage: [],
+  memoryArchive: [],
   ops: {},
   thinking: false,
   awaitingResponse: false,
@@ -633,18 +751,21 @@ function reduceFrame(s: State, frame: ServerFrame): Partial<State> {
                   model: frame.model ?? '',
                 },
               ].slice(-TURN_STATS_CAP),
-        // Settle everything the turn left open. A tool call still running here was
-        // interrupted — Amber sends no closing frame on the cancellation path, so
-        // this is where the client applies what it already knows.
-        timeline: s.timeline.map((item) => {
-          if (item.kind === 'message' && item.streaming) {
-            return { ...item, streaming: false }
-          }
-          if (item.kind === 'activity' && item.running) {
-            return { ...item, running: false, interrupted: true }
-          }
-          return item
-        }),
+        // Settle everything the turn left open, then mark where it ended. A tool call
+        // still running here was interrupted — Amber sends no closing frame on the
+        // cancellation path, so this is where the client applies what it already knows.
+        timeline: [
+          ...s.timeline.map((item) => {
+            if (item.kind === 'message' && item.streaming) {
+              return { ...item, streaming: false }
+            }
+            if (item.kind === 'activity' && item.running) {
+              return { ...item, running: false, interrupted: true }
+            }
+            return item
+          }),
+          ...(frame.timings ? [turnMark(s.timeline, frame, s.memoryFacts)] : []),
+        ],
         trace: push(
           trace(
             'info',
@@ -704,6 +825,16 @@ function reduceFrame(s: State, frame: ServerFrame): Partial<State> {
           trace: push(trace('info', `memory browse (${frame.facts?.length ?? 0})`)),
         }
       }
+      // A fact's revision history, and the archive of what she no longer believes.
+      // Each lands in its own slot for the same reason `browse` does: they answer
+      // different questions, and one silently replacing another is how a panel ends
+      // up showing an archive where it promised the current facts.
+      if (frame.scope === 'lineage') {
+        return { memoryLineage: frame.facts ?? [] }
+      }
+      if (frame.scope === 'archive') {
+        return { memoryArchive: frame.facts ?? [] }
+      }
       return {
         memoryItems: frame.items,
         memoryFacts: frame.facts ?? [],
@@ -758,6 +889,16 @@ function reduceFrame(s: State, frame: ServerFrame): Partial<State> {
         trace: push(trace('info', `push (${frame.kind})`, frame.text)),
       }
     }
+
+    case 'review':
+      return {
+        review: {
+          ...s.review,
+          [frame.topic]: frame.items,
+          ...(frame.since ? { since: frame.since } : {}),
+          ack: frame.ack ?? null,
+        },
+      }
 
     case 'confirm_request':
       return {

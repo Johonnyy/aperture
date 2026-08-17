@@ -6,6 +6,7 @@ import { cn } from '../cn'
 import { useStore } from '../store'
 import { Dot, Ring } from '../viz/primitives'
 import { ApprovalCard } from './ApprovalCard'
+import { ReviewPanel } from './ReviewPanel'
 import { MemoryPanel } from './MemoryPanel'
 import { RunningPanel } from './RunningPanel'
 import { SpendPanel } from './SpendPanel'
@@ -100,6 +101,12 @@ export function StatusPanel({ view }: { view: string }): React.JSX.Element {
 
         <Section id="memory" label="Memory" muted={!chatty}>
           {chatty ? <MemoryPanel /> : <MemorySummary />}
+        </Section>
+
+        {/* How she is doing, as opposed to what she is doing. Muted off the chat
+            view for the same reason Memory is: it is background there. */}
+        <Section id="review" label="Health" muted={!chatty}>
+          <ReviewPanel />
         </Section>
 
         <Section id="system" label="System">

@@ -99,6 +99,18 @@ const api = {
     memoryQuery: (q: string | null, limit?: number): Promise<boolean> =>
       ipcRenderer.invoke(IPC.AMBER_MEMORY_QUERY, q, limit),
     /**
+     * A fact's revision history (`lineage`), or what Amber no longer believes
+     * (`archive`).
+     *
+     * Both answer with a `memory` frame carrying the matching scope, so they land in
+     * their own slots rather than overwriting the facts in play right now.
+     */
+    memoryScope: (
+      scope: 'lineage' | 'archive',
+      id?: number,
+      limit?: number,
+    ): Promise<boolean> => ipcRenderer.invoke(IPC.AMBER_MEMORY_SCOPE, scope, id, limit),
+    /**
      * Acknowledge a `push`.
      *
      * `complete` does more than dismiss: it resolves what the push referred to and
@@ -117,6 +129,38 @@ const api = {
      */
     confirm: (id: string, approved: boolean): Promise<boolean> =>
       ipcRenderer.invoke(IPC.AMBER_CONFIRM, id, approved),
+    /**
+     * Ask how Amber is doing. Answered with a `review` frame carrying the same topic.
+     *
+     * All three topics read data she has always recorded and never showed anyone: tool
+     * latency fed a single LLM prompt, the self-review notes needed an MCP key, and
+     * eval cases had nowhere to live at all.
+     */
+    reviewQuery: (
+      topic: 'tools' | 'reflections' | 'evals',
+      since?: string,
+      limit?: number,
+    ): Promise<boolean> => ipcRenderer.invoke(IPC.AMBER_REVIEW_QUERY, topic, since, limit),
+    /**
+     * Act on one reviewed item.
+     *
+     * `promote` turns a reflection into an ordinary durable fact. That is what lets
+     * `AMBER_FEATURE_SELF_NOTES` stay off: the note is kept because a person chose to
+     * keep it, not because the model rewrote its own instructions.
+     */
+    reviewAction: (
+      topic: 'tools' | 'reflections' | 'evals',
+      action: 'promote' | 'dismiss' | 'archive',
+      id: number,
+    ): Promise<boolean> => ipcRenderer.invoke(IPC.AMBER_REVIEW_ACTION, topic, action, id),
+    /** Save the turn on screen as a regression case, replayable by `python -m app.evals`. */
+    captureEval: (payload: {
+      query: string
+      expect_tool?: string
+      got_tool?: string
+      note?: string
+      reply?: string
+    }): Promise<boolean> => ipcRenderer.invoke(IPC.AMBER_EVAL_CAPTURE, payload),
     /**
      * Point a model keyword at a model — `null` resets it to Amber's default.
      *
