@@ -258,6 +258,32 @@ body::after {
   animation: pulse-dot 1.2s ease-in-out infinite;
 }
 
+/* The streaming caret, at the end of the reply's last line.
+ *
+ * A pseudo-element rather than a node, because placement is the whole point. A span
+ * rendered after the markdown lands *below* it — the markdown's last child is a block
+ * element and a block ends the line — so the caret stood alone on a new row and read
+ * as "another paragraph is coming". ::after on the last block inherits that block's
+ * inline flow instead, which puts it where a cursor belongs: immediately after the
+ * final character.
+ *
+ * The containers are split out because their own last child is what the reader is
+ * looking at. `> :last-child::after` on a `<ul>` would draw the caret under the list,
+ * and drawing it on both the list and its final item would draw two. The `:not()`
+ * chain on the general rule is what keeps those from overlapping. */
+.reply-caret > :last-child:not(ul):not(ol):not(blockquote)::after,
+.reply-caret > :is(ul, ol):last-child > li:last-child::after,
+.reply-caret > blockquote:last-child > :last-child::after {
+  content: '';
+  display: inline-block;
+  width: 0.5ch;
+  height: 1em;
+  margin-left: 0.15em;
+  vertical-align: text-bottom;
+  background: var(--color-accent);
+  animation: pulse-dot 1.2s ease-in-out infinite;
+}
+
 /* The registry map's live edge, marching toward the trunk.
  *
  * Applied ONLY to the hovered or focused node's edge, never to all of them: fifteen

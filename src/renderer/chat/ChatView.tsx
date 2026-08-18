@@ -50,7 +50,7 @@ export function ChatView({ amber }: { amber: Amber }): React.JSX.Element {
 
         <div className="mx-auto flex max-w-3xl flex-col gap-3">
           <AnimatePresence initial={false}>
-            {timeline.map((item) => (
+            {timeline.map((item, i) => (
               <motion.div
                 key={item.id}
                 layout="position"
@@ -58,7 +58,15 @@ export function ChatView({ amber }: { amber: Amber }): React.JSX.Element {
                 animate={{ opacity: 1, y: 0 }}
               >
                 {item.kind === 'message' ? (
-                  <MessageBubble message={item} />
+                  // Only the item at the very end of a turn that is still running can
+                  // be mid-sentence. Three independent facts have to agree before a
+                  // caret is drawn — see the `live` note in MessageBubble — because
+                  // this is the one indicator where being wrong is a standing lie
+                  // rather than a missing detail.
+                  <MessageBubble
+                    message={item}
+                    live={thinking && i === timeline.length - 1}
+                  />
                 ) : item.kind === 'turn' ? (
                   <div className="flex flex-col gap-1">
                     <Provenance

@@ -52,7 +52,14 @@ export interface Message {
    */
   raw: string
   ts: number
-  /** True while the reply is still arriving. */
+  /**
+   * True while *this* bubble is still being written.
+   *
+   * At most one message in the timeline carries it: every path that ends a segment —
+   * a tool call starting, the next segment opening, `turn_complete`, an error, the
+   * user speaking again — settles the open one. That invariant is what the caret
+   * rests on, and it is why the caret cannot outlive the turn that drew it.
+   */
   streaming?: boolean
   /** The turn was cut short — this is as much as was said. */
   interrupted?: boolean
@@ -146,7 +153,6 @@ export function lastMessage(timeline: TimelineItem[]): Message | null {
   return null
 }
 
-/** The reply still being streamed, if there is one. */
 /**
  * Build the latency mark for a turn that has just finished.
  *
@@ -163,7 +169,10 @@ function turnMark(
   let startedAt = timeline[0]?.ts ?? Date.now()
   const tools: TurnMark['tools'] = []
   let query = ''
-  let reply = ''
+  // Every amber segment of this turn, newest first — a reply that narrated, called a
+  // tool and then reported back is several bubbles now, and an eval case built from
+  // the last one alone would record half of what she said.
+  const said: string[] = []
 
   for (let i = timeline.length - 1; i >= 0; i--) {
     const item = timeline[i]
@@ -177,7 +186,7 @@ function turnMark(
         startedAt = item.ts
         break
       }
-      if (!reply) reply = item.raw || item.text
+      said.unshift(item.raw || item.text)
       continue
     }
     if (item.kind === 'activity') {
@@ -199,14 +208,41 @@ function turnMark(
     tools,
     startedAt,
     query,
-    reply,
+    reply: said.join('\n\n'),
     facts,
   }
 }
 
-function streamingReply(timeline: TimelineItem[]): Message | null {
-  const last = lastMessage(timeline)
-  return last?.role === 'amber' && last.streaming ? last : null
+/**
+ * The bubble a `delta` continues, or null when the next one starts a new bubble.
+ *
+ * Strictly the **last timeline item**, not the last message: anything sitting between
+ * — a tool card, a turn mark — ends the segment. "Sure, I'll take care of that",
+ * three tool calls, and "all done" are three things that happened in that order, and
+ * appending the last to the first renders them as one paragraph that was never
+ * written as one, with the tool cards stranded above it.
+ */
+function openReply(timeline: TimelineItem[]): Message | null {
+  const last = timeline.at(-1)
+  return last && last.kind === 'message' && last.role === 'amber' && last.streaming
+    ? last
+    : null
+}
+
+/**
+ * Close every open bubble.
+ *
+ * The one invariant the caret depends on: exactly one message can be `streaming`, and
+ * only while text is genuinely still arriving into it. Every ending calls this — the
+ * next segment opening, a tool call starting, `turn_complete`, an error, the user
+ * speaking again — because a caret that survives its turn stops meaning "still
+ * writing" and becomes a permanent decoration on every reply in the log.
+ */
+function settleReplies(timeline: TimelineItem[]): TimelineItem[] {
+  if (!timeline.some((item) => item.kind === 'message' && item.streaming)) return timeline
+  return timeline.map((item) =>
+    item.kind === 'message' && item.streaming ? { ...item, streaming: false } : item,
+  )
 }
 
 /** Replace one item in place, keeping order. */
@@ -495,7 +531,7 @@ export const useStore = create<State>((set) => ({
   addUserMessage: (text) =>
     set((s) => ({
       timeline: [
-        ...s.timeline,
+        ...settleReplies(s.timeline),
         {
           kind: 'message',
           id: nextId(),
@@ -658,11 +694,16 @@ function reduceFrame(s: State, frame: ServerFrame): Partial<State> {
       // dedupe and double every typed turn.
       const previous = lastMessage(s.timeline)
       if (previous?.role === 'user' && previous.text === frame.text) {
-        return { trace: push(trace('info', 'transcript', frame.text)) }
+        return {
+          timeline: settleReplies(s.timeline),
+          trace: push(trace('info', 'transcript', frame.text)),
+        }
       }
       return {
         timeline: [
-          ...s.timeline,
+          // A turn that died without `turn_complete` — an error, a dropped socket —
+          // leaves a bubble open, and the next turn is proof it is finished.
+          ...settleReplies(s.timeline),
           {
             kind: 'message',
             id: nextId(),
@@ -679,18 +720,26 @@ function reduceFrame(s: State, frame: ServerFrame): Partial<State> {
     case 'thinking':
       return {
         thinking: frame.active,
+        // The earliest honest proof that nothing more is coming, and the most
+        // reliable: Amber sends `thinking:false` from a `finally`, after the last
+        // sentence is on the wire and *before* `turn_complete`. So it arrives on the
+        // paths that never reach `turn_complete` at all — an interrupt, a raised
+        // turn — which is exactly where a caret used to get stranded.
+        ...(frame.active ? {} : { timeline: settleReplies(s.timeline) }),
         trace: push(trace('info', `thinking: ${frame.active}`)),
       }
 
     case 'delta': {
       // The reply's text view. Appended verbatim — no trimming, no joining — because
       // the whitespace *is* what this frame exists to preserve.
-      const open = streamingReply(s.timeline)
+      const open = openReply(s.timeline)
       return {
         timeline: open
           ? patch(s.timeline, open.id, { raw: open.raw + frame.text })
           : [
-              ...s.timeline,
+              // Nothing open at the very end of the timeline, so this is a new
+              // segment — after a tool call, or the first words of the turn.
+              ...settleReplies(s.timeline),
               {
                 kind: 'message',
                 id: nextId(),
@@ -710,14 +759,19 @@ function reduceFrame(s: State, frame: ServerFrame): Partial<State> {
       // Sentences still accumulate, as the fallback for an Amber with no `delta`
       // frame. When deltas *are* arriving this is the spoken-progress marker and the
       // renderer ignores `text` entirely.
-      const open = streamingReply(s.timeline)
+      const open = openReply(s.timeline)
       return {
         timeline: open
           ? patch(s.timeline, open.id, {
               text: `${open.text} ${frame.text}`.trim(),
             })
           : [
-              ...s.timeline,
+              // Same segmenting rule as `delta`, so an Amber that sends no deltas at
+              // all still gets a bubble per segment rather than one per turn. It can
+              // only reach here when no delta opened a bubble first — sentences are
+              // synthesized and sent before the stream resumes, so one never arrives
+              // after the tool card it preceded and cannot print the reply twice.
+              ...settleReplies(s.timeline),
               {
                 kind: 'message',
                 id: nextId(),
@@ -755,15 +809,11 @@ function reduceFrame(s: State, frame: ServerFrame): Partial<State> {
         // still running here was interrupted — Amber sends no closing frame on the
         // cancellation path, so this is where the client applies what it already knows.
         timeline: [
-          ...s.timeline.map((item) => {
-            if (item.kind === 'message' && item.streaming) {
-              return { ...item, streaming: false }
-            }
-            if (item.kind === 'activity' && item.running) {
-              return { ...item, running: false, interrupted: true }
-            }
-            return item
-          }),
+          ...settleReplies(s.timeline).map((item) =>
+            item.kind === 'activity' && item.running
+              ? { ...item, running: false, interrupted: true }
+              : item,
+          ),
           ...(frame.timings ? [turnMark(s.timeline, frame, s.memoryFacts)] : []),
         ],
         trace: push(
@@ -779,7 +829,9 @@ function reduceFrame(s: State, frame: ServerFrame): Partial<State> {
       if (frame.phase === 'start') {
         return {
           timeline: [
-            ...s.timeline,
+            // Amber flushes a newline at every tool boundary, so the words above the
+            // card are a finished thought — anything after it opens a new bubble.
+            ...settleReplies(s.timeline),
             {
               kind: 'activity',
               id: frame.id,
@@ -908,6 +960,9 @@ function reduceFrame(s: State, frame: ServerFrame): Partial<State> {
 
     case 'error':
       return {
+        // A failed turn never reaches `turn_complete`, so this is the only place that
+        // can close the bubble it was midway through writing.
+        timeline: settleReplies(s.timeline),
         lastError: { message: frame.message, code: frame.code },
         trace: push(trace('error', `error${frame.code ? ` (${frame.code})` : ''}`, frame.message)),
       }
