@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import {
   MODEL_TIERS,
   SLUG_PATTERN,
   type AgentConfig,
   type AgentConfigInput,
+  type BloomKeyword,
 } from '../../shared/bloom'
 import { Field, SmallButton } from '../infra/parts'
 
@@ -30,6 +31,11 @@ import { Field, SmallButton } from '../infra/parts'
  *   hatch. Rejecting locally would mean a valid value refused by a stale client — so
  *   it goes to the server, and the server's sentence is what gets shown.
  *
+ * The picker asks Bloom what its vocabulary *is*, rather than shipping a copy.
+ * `agent_runtime`'s ladder — cheap/balanced/strong — can only say "better"; the
+ * keywords that name an *axis* (`coding`, `vision`, `long`) are the entire reason
+ * Bloom keeps its own table, and a hardcoded ladder here hid all seven of them.
+ *
  * The ceilings say "at most" because that is what they are: Bloom clamps a config
  * down to its own limits and never up, silently. Labelling them as targets would
  * promise something the backend does not honour.
@@ -51,6 +57,32 @@ export function AgentEditor({
   const [maxCost, setMaxCost] = useState(agent?.maxCostUsd?.toString() ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [keywords, setKeywords] = useState<BloomKeyword[] | null>(null)
+
+  // A failed read is survivable and must not block editing an agent: fall back to
+  // the three rungs every Bloom knows, since those are `agent_runtime`'s own and
+  // cannot be absent. Losing the axes for one session beats an uneditable form.
+  useEffect(() => {
+    let live = true
+    void window.aperture.bloom.keywords().then((result) => {
+      if (live && result.ok) setKeywords(result.value.keywords)
+    })
+    return () => {
+      live = false
+    }
+  }, [])
+
+  const options: BloomKeyword[] =
+    keywords ??
+    MODEL_TIERS.map((name) => ({
+      name,
+      model: '',
+      description: '',
+      builtin: true,
+      overridden: false,
+    }))
+  const names = options.map((option) => option.name)
+  const chosen = options.find((option) => option.name === tier)
 
   const slugOk = SLUG_PATTERN.test(slug)
   const dirty =
@@ -133,21 +165,31 @@ export function AgentEditor({
         </span>
       </label>
 
-      <Row label="Model" hint="A named tier, or a literal vendor/model id.">
+      <Row label="Model" hint="A named keyword, or a literal vendor/model id.">
         <select
-          value={MODEL_TIERS.includes(tier) ? tier : '__literal'}
+          value={names.includes(tier) ? tier : '__literal'}
           onChange={(e) => setTier(e.target.value === '__literal' ? '' : e.target.value)}
           className="rounded-control border border-line bg-raised px-2.5 py-1 text-meta text-ink outline-none focus:border-accent-deep"
         >
-          {MODEL_TIERS.map((t) => (
-            <option key={t} value={t}>
-              {t}
+          {options.map((option) => (
+            <option key={option.name} value={option.name} title={option.description}>
+              {option.name}
             </option>
           ))}
           <option value="__literal">a specific model…</option>
         </select>
-        {!MODEL_TIERS.includes(tier) && (
+        {!names.includes(tier) && (
           <Field value={tier} onChange={setTier} placeholder="anthropic/claude-sonnet-4.6" />
+        )}
+        {/* What the word means on *this* Bloom — the question a keyword always
+            raises. `shared` says the answer came from the sync store rather than
+            from what this box shipped with, which is the difference between the
+            fleet agreeing and this one being on its own. */}
+        {chosen?.model && (
+          <span className="text-xs text-muted">
+            {chosen.model}
+            {chosen.overridden && ' · shared'}
+          </span>
         )}
       </Row>
 
