@@ -2,7 +2,13 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { diagnose, type RegistryNode } from '../../shared/registry'
 import { SYNC_STORE_IMAGE_SCHEMA, type InfraStatus } from '../../shared/types'
-import { compareVersions, tagOf, type ReleaseInfo } from '../../shared/version'
+import {
+  compareVersions,
+  describeDistance,
+  displayVersion,
+  tagOf,
+  type ReleaseInfo,
+} from '../../shared/version'
 import { Card, Chip, Field, SmallButton } from './parts'
 import { PeerLinks } from './PeerLinks'
 import { useStore } from '../store'
@@ -260,7 +266,8 @@ function Row({
  *
  * Three states worth distinguishing, and they read differently on purpose:
  *
- *   *behind*   — a newer release exists. The button offers that exact tag.
+ *   *behind*   — a newer commit exists on the default branch, usually with a count
+ *                ("3 commits behind"). The button offers that exact commit.
  *   *drift*    — secrets.yaml and the deployed compose disagree, which means a pin
  *                somebody set is not what is running and a reinstall would change the
  *                version as a side effect. This is the one that must not be silent.
@@ -297,7 +304,12 @@ function Version({
   const running = store.imageRunning ?? null
   const pinnedTag = tagOf(pinned)
   const latest = release?.latest ?? null
-  const comparison = compareVersions(pinnedTag, latest)
+  const comparison = compareVersions(pinnedTag, latest, release?.compare)
+  // Commits are unreadable at full length and meaningless with a `v` in front, so
+  // one helper decides how each end is named rather than every template literal.
+  const pinnedLabel = displayVersion(pinnedTag)
+  const latestLabel = displayVersion(latest)
+  const distance = describeDistance(release)
 
   // secrets.yaml against the deployed compose. `ensure_sync_store` only writes the
   // image on first create, so an edited pin waits silently for the next fresh install.
@@ -315,7 +327,7 @@ function Version({
         <span className="min-w-0 flex-1 font-mono text-meta text-ink">
           {reports ? (
             <>
-              {pinnedTag ?? pinned ?? 'unknown'}
+              {pinnedLabel ?? pinned ?? 'unknown'}
               {comparison === 'up-to-date' && latest && (
                 <span className="ml-2 font-sans text-micro text-muted">latest</span>
               )}
@@ -330,12 +342,15 @@ function Version({
         {offer && (
           <SmallButton
             disabled={disabled}
-            title={`Pulls ${offer}, restarts, and reverts if it does not come back healthy.`}
+            title={`Pulls ${latestLabel}${distance ? ` (${distance})` : ''}, restarts, and reverts if it does not come back healthy.`}
             onClick={() =>
-              run('updateSyncStore', `Update the registry to ${offer}`, { tag: offer })
+              // `offer` is the full 40-character SHA, which is what
+              // update-sync-store.sh requires — it refuses a short one rather than
+              // expanding it against a checkout the box does not have.
+              run('updateSyncStore', `Update the registry to ${latestLabel}`, { tag: offer })
             }
           >
-            Update to {offer}
+            Update to {latestLabel}
           </SmallButton>
         )}
         {!offer && (drift || unrestarted) && (
@@ -351,20 +366,20 @@ function Version({
 
       {drift && (
         <p className="text-micro leading-relaxed text-warn">
-          secrets.yaml pins <code>{tagOf(declared) ?? declared}</code> but{' '}
-          <code>{pinnedTag ?? pinned}</code> is deployed. A reinstall would change the
+          secrets.yaml pins <code>{displayVersion(tagOf(declared)) ?? declared}</code> but{' '}
+          <code>{pinnedLabel ?? pinned}</code> is deployed. A reinstall would change the
           version as a side effect.
         </p>
       )}
       {!drift && unrestarted && (
         <p className="text-micro leading-relaxed text-warn">
-          Running <code>{tagOf(running) ?? running}</code>, which is not the pinned
+          Running <code>{displayVersion(tagOf(running)) ?? running}</code>, which is not the pinned
           image — it has not been restarted since the pin changed.
         </p>
       )}
       {release?.error && (
         <p className="text-micro leading-relaxed text-muted">
-          Could not check for a newer release: {release.error}
+          Could not check for a newer version: {release.error}
         </p>
       )}
     </div>
@@ -465,14 +480,19 @@ function Machinery({
           </SmallButton>
         </div>
 
-        {/* The version row above offers the newest release; this is for any other tag —
-            a rollback, a prerelease, or a box whose release check cannot reach GitHub.
-            Empty means "re-pull the current pin", which is the wedged-container case. */}
+        {/* The version row above offers the newest commit; this is for any other one —
+            a rollback, or a box whose version check cannot reach GitHub. Empty means
+            "re-pull the current pin", which is the wedged-container case.
+
+            A full 40-character SHA, not a short one: there is no checkout on the box to
+            expand a short one against, so update-sync-store.sh refuses it rather than
+            guessing which commit was meant and pinning the registry every app depends
+            on to the wrong code. */}
         <div className="flex flex-wrap items-center gap-2">
-          <Field value={tag} onChange={setTag} placeholder="tag, e.g. 0.2.0" />
+          <Field value={tag} onChange={setTag} placeholder="full commit sha, or an image tag" />
           <SmallButton
             disabled={disabled}
-            title="Pulls that tag, restarts, waits for health, and reverts to the last good image if it does not come back. Writes secrets.yaml only on success."
+            title="Pulls that commit, restarts, waits for health, and reverts to the last good image if it does not come back. Writes secrets.yaml only on success."
             onClick={() =>
               run(
                 'updateSyncStore',

@@ -1,12 +1,19 @@
 /**
  * Is there a newer version of this app than the one pinned on the box?
  *
- * "Set the version" in this ecosystem means pushing a `v*` git tag: `release.yml`
- * builds on that tag with `flavor: latest=false` and `type=semver`, so the newest
- * release of an app's repo *is* the newest publishable image. That is why this asks
- * GitHub rather than the registry — the registry would answer with every tag ever
- * pushed, including `sha-…` and the `:stable` pointer, and then this would have to
- * decide which of them counted as a version. The repo already decided.
+ * "Set the version" in this ecosystem means **pushing to the default branch**.
+ * `release.yml` runs the tests on every push and, if they pass, publishes
+ * `ghcr.io/<owner>/<app>:sha-<40hex>`. There are no `v*` tags and no version bumps, so
+ * the newest commit on a repo's default branch *is* the newest publishable image. That
+ * is why this asks GitHub rather than the registry — the registry would answer with
+ * every tag ever pushed and leave this deciding which of them counted as a version.
+ * The repo already decided.
+ *
+ * **The default branch is never named here.** GitHub's commits endpoint defaults to
+ * whatever the repo's own default branch is, which matters because this ecosystem is
+ * split: `main` for amber and the libraries, `master` for bloom and amber-template.
+ * Anything that hardcoded one would be wrong for half the fleet and silent about it —
+ * which is precisely how amber-template's CI never ran once.
  *
  * The rule that matters: **a failure is `unknown`, never "up to date"**. A rate-limited
  * or offline check that rendered green would be the same class of invisible failure as
@@ -20,15 +27,34 @@
 import {
   type Comparison,
   type ReleaseInfo,
+  COMMIT,
   SEMVER,
+  commitOf,
+  compareCommits,
   compareVersions,
+  describeDistance,
+  displayVersion,
+  releaseKey,
   repoSlug,
+  shortSha,
   tagOf,
 } from '../../shared/version'
 
 // Re-exported so `scripts/verify-releases.mjs` can drive resolution and comparison
 // from one bundle, and so a caller in main needs only this module.
-export { compareVersions, repoSlug, tagOf }
+export {
+  COMMIT,
+  SEMVER,
+  commitOf,
+  compareCommits,
+  compareVersions,
+  describeDistance,
+  displayVersion,
+  releaseKey,
+  repoSlug,
+  shortSha,
+  tagOf,
+}
 export type { Comparison, ReleaseInfo }
 
 interface FetchLike {
@@ -39,12 +65,28 @@ interface FetchLike {
   }>
 }
 
+interface CommitResponse {
+  sha?: string
+  commit?: { message?: string; committer?: { date?: string } }
+}
+
+interface CompareResponse {
+  status?: string
+  ahead_by?: number
+  behind_by?: number
+}
+
 /**
- * The newest release of `owner/repo`.
+ * The newest commit on `owner/repo`'s default branch.
  *
- * Falls back to the tag list, because `releases/latest` is 404 for a repo that pushes
- * tags without cutting GitHub Releases — which is exactly what `release.yml` does. The
- * fallback is the normal path, not the exceptional one.
+ * One request, because `/commits?per_page=1` already defaults to the default branch —
+ * asking `/repos/{repo}` for `default_branch` first would double the rate-limit cost
+ * to learn something the next call knows anyway.
+ *
+ * A second request happens only when `pinned` was supplied and differs from the head:
+ * `/compare` turns "different" into "3 commits behind", and distinguishes a pin that is
+ * merely old from one that is not on this branch at all. It is strictly an
+ * enrichment — a failure there leaves the answer usable rather than discarding it.
  *
  * `token` is optional but wanted: unauthenticated calls are limited to 60/hour per IP
  * and a private repo answers 404 without one. It comes from the credential vault
@@ -52,7 +94,13 @@ interface FetchLike {
  */
 export async function resolveLatest(
   repo: string,
-  opts: { token?: string | null; fetchImpl?: FetchLike; now?: number } = {},
+  opts: {
+    token?: string | null
+    fetchImpl?: FetchLike
+    now?: number
+    /** The commit currently pinned, if known — enables the ahead/behind enrichment. */
+    pinned?: string | null
+  } = {},
 ): Promise<ReleaseInfo> {
   const checkedAt = opts.now ?? Date.now()
   const fail = (error: string): ReleaseInfo => ({ latest: null, error, checkedAt })
@@ -69,38 +117,92 @@ export async function resolveLatest(
   if (opts.token) headers.Authorization = `Bearer ${opts.token}`
 
   try {
-    const rel = await doFetch(`https://api.github.com/repos/${repo}/releases/latest`, { headers })
-    if (rel.ok) {
-      const body = (await rel.json()) as { tag_name?: string }
-      const tag = body?.tag_name?.replace(/^v/, '') ?? null
-      if (tag) return { latest: tag, checkedAt }
-    } else if (rel.status === 403 || rel.status === 429) {
-      // Named, because the fix is specific: save a `github-token` on the Keys page.
-      return fail('GitHub rate limit reached — add a github-token credential to raise it')
-    } else if (rel.status === 401) {
-      return fail('the saved github-token was rejected')
-    } else if (rel.status !== 404) {
-      return fail(`GitHub answered ${rel.status}`)
+    const res = await doFetch(`https://api.github.com/repos/${repo}/commits?per_page=1`, {
+      headers,
+    })
+    if (!res.ok) {
+      // Named, because each fix is specific.
+      if (res.status === 403 || res.status === 429) {
+        return fail('GitHub rate limit reached — add a github-token credential to raise it')
+      }
+      if (res.status === 401) return fail('the saved github-token was rejected')
+      if (res.status === 404) return fail(`no such repo, or it is private: ${repo}`)
+      // 409 is GitHub's answer for a repository with no commits at all.
+      if (res.status === 409) return fail(`${repo} has no commits on its default branch`)
+      return fail(`GitHub answered ${res.status}`)
     }
 
-    // No Release cut, or none visible. The tags are what release.yml actually builds
-    // from, so they are the real answer rather than a consolation prize.
-    const tags = await doFetch(`https://api.github.com/repos/${repo}/tags?per_page=100`, { headers })
-    if (!tags.ok) {
-      return fail(tags.status === 404 ? `no such repo, or it is private: ${repo}` : `GitHub answered ${tags.status}`)
+    const body = (await res.json()) as CommitResponse[]
+    if (!Array.isArray(body) || body.length === 0) {
+      return fail('unexpected response from GitHub')
     }
-    const list = (await tags.json()) as Array<{ name?: string }>
-    if (!Array.isArray(list)) return fail('unexpected response from GitHub')
+    const head = commitOf(body[0]?.sha ?? null)
+    if (!head) return fail('GitHub returned no commit SHA')
 
-    const versions = list
-      .map((t) => t?.name ?? '')
-      .filter((n) => SEMVER.test(n))
-      .map((n) => n.replace(/^v/, ''))
-      .sort((x, y) => (compareVersions(x, y) === 'behind' ? 1 : -1))
+    const info: ReleaseInfo = {
+      latest: head,
+      checkedAt,
+      // First line only. A commit body can be arbitrarily long and this lands in a
+      // one-line row; the full message is a click away on GitHub.
+      message: (body[0]?.commit?.message ?? '').split('\n')[0] || undefined,
+      committedAt: body[0]?.commit?.committer?.date,
+    }
 
-    if (versions.length === 0) return fail('no version tags published yet')
-    return { latest: versions[0], checkedAt }
+    const pinned = commitOf(opts.pinned ?? null)
+    if (!pinned || pinned === head) return info
+    return { ...info, compare: await resolveCompare(repo, pinned, head, doFetch, headers) }
   } catch (err) {
     return fail((err as Error).message || 'the check failed')
+  }
+}
+
+/**
+ * How far apart two commits are, per GitHub — reported **relative to the pin**.
+ *
+ * THE INVERSION IS THE WHOLE SUBTLETY. For `compare/BASE...HEAD`, GitHub's `status`
+ * describes the *head* relative to the base. We pass base = the pinned commit and
+ * head = the branch tip, so GitHub answering `ahead` (with `ahead_by: 3`) means the
+ * branch tip is three commits past the pin — i.e. **the box is three commits behind**.
+ * Passing that word straight through would render "3 commits ahead" on a box that is
+ * out of date, and offer no update: a confident false sentence, in the one module
+ * written to avoid them. So the two directional cases are swapped here, once, and
+ * everything downstream reads pin-relative.
+ *
+ * Undefined on any failure, and that is deliberate: this only ever *adds* precision to
+ * an answer that already exists. Turning a failed enrichment into a failed check would
+ * mean a rate limit on the second request threw away a perfectly good first one.
+ */
+async function resolveCompare(
+  repo: string,
+  base: string,
+  head: string,
+  doFetch: FetchLike,
+  headers: Record<string, string>,
+): Promise<ReleaseInfo['compare']> {
+  try {
+    const res = await doFetch(`https://api.github.com/repos/${repo}/compare/${base}...${head}`, {
+      headers,
+    })
+    if (!res.ok) return undefined
+    const body = (await res.json()) as CompareResponse
+    switch (body?.status) {
+      case 'identical':
+        return { status: 'identical', distance: 0 }
+      // A pin GitHub cannot place on this branch — a build from a deleted branch, or a
+      // force-pushed history — and the caller renders it as unknown rather than
+      // inventing a distance for it.
+      case 'diverged':
+        return { status: 'diverged', distance: 0 }
+      // Branch tip is past the pin → the pin is behind.
+      case 'ahead':
+        return { status: 'behind', distance: body.ahead_by ?? 0 }
+      // Branch tip is before the pin → the pin is ahead (a force-push, usually).
+      case 'behind':
+        return { status: 'ahead', distance: body.behind_by ?? 0 }
+      default:
+        return undefined
+    }
+  } catch {
+    return undefined
   }
 }

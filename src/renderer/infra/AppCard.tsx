@@ -5,7 +5,13 @@ import type { CredentialSummary, InfraApp } from '../../shared/types'
 import { Configuration } from './Configuration'
 import { Chip, Field, SmallButton } from './parts'
 import { fillsFor, readinessFor, ReadinessList, ReadinessSummary } from './Readiness'
-import { compareVersions, tagOf, type ReleaseInfo } from '../../shared/version'
+import {
+  compareVersions,
+  describeDistance,
+  displayVersion,
+  tagOf,
+  type ReleaseInfo,
+} from '../../shared/version'
 import type { Params } from './useRunner'
 
 /**
@@ -39,13 +45,13 @@ export function AppCard({
   advanced: boolean
   credentials: CredentialSummary[]
   onCredentialSaved: () => void
-  /** The newest published version of this app, when its manifest names a repo. */
+  /** The newest commit on this app's default branch, when its manifest names a repo. */
   release?: ReleaseInfo
   checkingRelease?: boolean
   /**
-   * Re-ask GitHub for this app's newest release, ignoring the ten-minute cache.
-   * Undefined when the manifest names no repo, which is the one case where there is
-   * genuinely nothing to ask.
+   * Re-ask GitHub for the newest commit on this app's default branch, ignoring the
+   * ten-minute cache. Undefined when the manifest names no repo, which is the one case
+   * where there is genuinely nothing to ask.
    */
   onCheckReleases?: () => void
   /** What upstream and server would be if the stanza does not say. */
@@ -109,19 +115,34 @@ export function AppCard({
    *   pinned   what secrets.yaml / the compose file say to run
    *   running  what the container is actually running — differs when the pin was
    *            bumped and nothing restarted (the existing `drift` above)
-   *   latest   the newest published release
+   *   latest   the newest commit on the repo's default branch
    *
-   * So "restart to pick up the pin" and "a newer release exists" are different rows
+   * So "restart to pick up the pin" and "a newer version exists" are different rows
    * with different buttons, and conflating them would offer an update to a version
    * already sitting on the disk.
    *
-   * Watchtower apps are excluded from the Update button entirely: they run the moving
-   * `:stable` tag and update themselves, so a manual button would be fighting an
-   * auto-updater. `role` in the manifest is what makes that decidable.
+   * All three are commits now. There are no release tags anywhere in the ecosystem:
+   * release.yml publishes one image per commit as `sha-<40hex>`, so a pin is a commit
+   * and "latest" is a branch head. The distance between them comes from GitHub's
+   * compare API, because commits carry no ordering of their own — which is the one
+   * thing genuinely lost with semver, and the reason `describeDistance` returns null
+   * rather than guessing when that call did not happen.
+   *
+   * `autoUpdates` is kept but is currently always false in practice: the `:stable`
+   * moving tag it excluded apps for no longer exists, since commit-based versioning
+   * publishes nothing that moves and the job that republished it is gone. It stays
+   * because `role: app` still means "this box updates itself", and reintroducing that
+   * would otherwise silently grow a second update path fighting this button.
    */
   const pinnedTag = tagOf(app.imagePinned)
+  // `v0ad599bdd724` is not a version string. The `v` prefix belongs to semver, and
+  // pins are commits now, so which prefix to use is a decision `displayVersion` makes
+  // once rather than five template literals making it inconsistently.
+  const pinnedLabel = displayVersion(pinnedTag)
   const autoUpdates = app.manifest?.role === 'app'
-  const versus = compareVersions(pinnedTag, release?.latest ?? null)
+  const versus = compareVersions(pinnedTag, release?.latest ?? null, release?.compare)
+  // "3 commits behind", or null when nothing honest can be said about the distance.
+  const distance = describeDistance(release)
   const canUpdate = !notDeployed && !autoUpdates && versus === 'behind'
 
   const prefixDrift =
@@ -170,19 +191,20 @@ export function AppCard({
               {autoUpdates ? (
                 <span className="text-muted">auto-updates via Watchtower</span>
               ) : versus === 'behind' ? (
-                <span className="text-accent">
-                  v{pinnedTag} → v{release?.latest} available
+                <span className="text-accent" title={release?.message ?? undefined}>
+                  {pinnedLabel} → {displayVersion(release?.latest)}
+                  {distance ? ` · ${distance}` : ''} available
                 </span>
               ) : versus === 'up-to-date' ? (
-                <span className="text-muted">v{pinnedTag} · up to date</span>
+                <span className="text-muted">{pinnedLabel} · up to date</span>
               ) : versus === 'ahead' ? (
                 <span className="text-muted">
-                  v{pinnedTag} · newer than the latest release (v{release?.latest})
+                  {pinnedLabel} · newer than the branch head ({displayVersion(release?.latest)})
                 </span>
               ) : (
                 // Never "up to date". A check that could not run is not evidence.
                 <span className="text-muted" title={release?.error ?? 'not checked yet'}>
-                  {pinnedTag ? `v${pinnedTag} · ` : ''}latest unknown
+                  {pinnedLabel ? `${pinnedLabel} · ` : ''}latest unknown
                 </span>
               )}
             </p>
@@ -270,9 +292,9 @@ export function AppCard({
             // server you are not sitting at.
             <SmallButton
               primary
-              title={`Pin ${app.name} to ${release?.latest} and restart it, reverting if it does not come back healthy`}
+              title={`Pin ${app.name} to ${displayVersion(release?.latest)} and restart it, reverting if it does not come back healthy`}
               onClick={() =>
-                run('updateApp', `Update ${app.name} to ${release?.latest}`, {
+                run('updateApp', `Update ${app.name} to ${displayVersion(release?.latest)}`, {
                   ...params,
                   tag: release?.latest ?? '',
                 })
@@ -284,7 +306,7 @@ export function AppCard({
           {!notDeployed && !autoUpdates && versus === 'unknown' && onCheckReleases && (
             <SmallButton
               disabled={checkingRelease}
-              title={release?.error ?? 'Ask GitHub for the newest published version'}
+              title={release?.error ?? 'Ask GitHub for the newest commit on the default branch'}
               onClick={onCheckReleases}
             >
               {checkingRelease ? 'Checking…' : 'Check'}
@@ -385,7 +407,7 @@ export function AppCard({
               <>
                 <SmallButton
                   disabled={checkingRelease}
-                  title={`Ask GitHub for the newest published release of ${app.name}, ignoring the ten-minute cache`}
+                  title={`Ask GitHub for the newest commit on ${app.name}'s default branch, ignoring the ten-minute cache`}
                   onClick={onCheckReleases}
                 >
                   {checkingRelease ? 'Checking…' : 'Check for updates'}
@@ -396,15 +418,15 @@ export function AppCard({
                 {canUpdate && (
                   <SmallButton
                     primary
-                    title={`Pin ${app.name} to ${release?.latest} and restart it, reverting if it does not come back healthy`}
+                    title={`Pin ${app.name} to ${displayVersion(release?.latest)} and restart it, reverting if it does not come back healthy`}
                     onClick={() =>
-                      run('updateApp', `Update ${app.name} to ${release?.latest}`, {
+                      run('updateApp', `Update ${app.name} to ${displayVersion(release?.latest)}`, {
                         ...params,
                         tag: release?.latest ?? '',
                       })
                     }
                   >
-                    Update to v{release?.latest}
+                    Update to {displayVersion(release?.latest)}
                   </SmallButton>
                 )}
                 <span className="text-micro text-muted">
@@ -413,7 +435,7 @@ export function AppCard({
                       // evidence, and the reason is the only thing that fixes it.
                       `${release.error} · last tried ${since(release.checkedAt)}`
                     : release?.latest
-                      ? `latest v${release.latest} · checked ${since(release.checkedAt)}`
+                      ? `latest ${displayVersion(release.latest)} · checked ${since(release.checkedAt)}`
                       : 'not checked yet'}
                 </span>
               </>
@@ -533,7 +555,11 @@ export function AppCard({
             >
               List tags
             </SmallButton>
-            <Field value={tag} onChange={setTag} placeholder="tag" />
+            {/* Whatever `List tags` printed — a `sha-<40hex>` commit tag, or a semver
+                one from before the switch. The listing prints tags unabbreviated for
+                exactly this reason: update-app.sh refuses a short commit rather than
+                expanding it against a checkout the box does not have. */}
+            <Field value={tag} onChange={setTag} placeholder="tag, from the list above" />
             <SmallButton
               disabled={notDeployed || !tag.trim()}
               title={notDeployed ? gone : undefined}

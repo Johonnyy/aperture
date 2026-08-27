@@ -4,7 +4,7 @@ import { EXPECTED_SCHEMA, type InfraStatus, type ServerConfig } from '../../shar
 import { AppCard } from './AppCard'
 import { Catalogue } from './Catalogue'
 import { useCredentials } from './Readiness'
-import { repoSlug, type ReleaseInfo } from '../../shared/version'
+import { releaseKey, repoSlug, type ReleaseInfo } from '../../shared/version'
 import { useStore } from '../store'
 import { DnsRecords } from './Dns'
 import { Card, Chip, Field, SmallButton } from './parts'
@@ -69,13 +69,23 @@ export function InfraView({
 
   const checkReleases = useCallback(
     async (from: InfraStatus | null, force = false) => {
+      // Each entry carries the commit that box is pinned to (`owner/repo@<sha>`), which
+      // is what lets the answer say "3 commits behind" rather than only "different" —
+      // commits have no ordering of their own, so the distance needs both ends.
       const repos = [
-        ...(from?.apps ?? []).map((a) => a.manifest?.release?.repo),
-        ...(from?.catalogue ?? []).map((c) => c.manifest?.release?.repo),
-        // The registry ships from amber-infra's own tags and has no manifest to name a
-        // repo in, so the clone URL below is the only thing that knows where its
-        // releases come from.
-        repoSlug(repoRef.current),
+        ...(from?.apps ?? []).map((a) =>
+          a.manifest?.release?.repo ? releaseKey(a.manifest.release.repo, a.imagePinned) : null,
+        ),
+        ...(from?.catalogue ?? []).map((c) =>
+          c.manifest?.release?.repo ? releaseKey(c.manifest.release.repo, c.image) : null,
+        ),
+        // The registry ships from amber-infra itself and has no manifest to name a repo
+        // in, so the clone URL below is the only thing that knows where its builds come
+        // from.
+        (() => {
+          const slug = repoSlug(repoRef.current)
+          return slug ? releaseKey(slug, from?.syncStore?.imagePinned) : null
+        })(),
       ].filter((r): r is string => Boolean(r))
       if (repos.length === 0) return
       setCheckingReleases(true)
@@ -334,7 +344,16 @@ export function InfraView({
             run={run}
             advanced={advanced}
             needsPassword={needsPassword}
-            release={releases[repoSlug(repo) ?? '']}
+            // Through `releaseKey`, exactly as the request was built — the key carries
+            // the pinned commit, and a lookup that dropped it would find nothing.
+            release={
+              releases[
+                (() => {
+                  const slug = repoSlug(repo)
+                  return slug ? releaseKey(slug, status.syncStore?.imagePinned) : ''
+                })()
+              ]
+            }
           />
 
           {status.warnings.length > 0 && (
@@ -391,6 +410,10 @@ export function InfraView({
               <ul className="flex flex-col gap-2">
                 {here.map((app) => {
                   const repo = app.manifest?.release?.repo ?? null
+                  // Same key the request used. `repo` alone stays the identity for the
+                  // per-row "Check for updates" button and its spinner, since those are
+                  // about a repository rather than about one pin.
+                  const key = repo ? releaseKey(repo, app.imagePinned) : null
                   return (
                     <AppCard
                       key={app.name}
@@ -400,11 +423,11 @@ export function InfraView({
                       advanced={advanced}
                       credentials={credentials}
                       onCredentialSaved={() => void refreshCredentials()}
-                      release={repo ? releases[repo] : undefined}
-                      checkingRelease={checkingReleases || checkingRepo === repo}
+                      release={key ? releases[key] : undefined}
+                      checkingRelease={checkingReleases || checkingRepo === key}
                       // Undefined when the manifest names no repo — the card then says
                       // there is nothing to ask, rather than offering a dead button.
-                      onCheckReleases={repo ? () => void checkRepo(repo) : undefined}
+                      onCheckReleases={key ? () => void checkRepo(key) : undefined}
                       // Both derivable, so neither should ever be an empty box you have
                       // to guess at: the loopback port comes out of the app's compose
                       // file, and the box label out of infra.server.
