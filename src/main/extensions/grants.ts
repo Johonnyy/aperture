@@ -27,7 +27,26 @@ import { JsonStore } from '../store'
 
 interface GrantRecord {
   granted: string[]
+  /** Whether the one-time seed below has run. Flat, like everything else here. */
+  seeded?: boolean
 }
+
+/**
+ * Permissions that were **already in effect before this consent screen existed**.
+ *
+ * SSH shipped working, with no grant to give and no screen to give it on. Introducing
+ * a permission model that silently revoked it on upgrade would be a regression dressed
+ * up as a security improvement: the capability would vanish, `register_tools` would go
+ * out empty, and Amber would simply stop being able to run commands with nothing
+ * anywhere saying why. A consent screen is only worth having if it records a decision
+ * someone actually made, and nobody ever decided to turn SSH off.
+ *
+ * So these are granted once, when the file is first created, and never again — if you
+ * revoke `ssh-terminal:pty` it stays revoked through every later launch. Genuinely new
+ * capabilities are deliberately **not** here: powering the machine off is a fresh
+ * decision, so `system-control` starts ungranted and asks.
+ */
+const SEEDED_GRANTS = ['ssh-terminal:pty', 'ssh-terminal:secrets']
 
 let store: JsonStore<GrantRecord> | null = null
 
@@ -36,14 +55,27 @@ let store: JsonStore<GrantRecord> | null = null
  * same reason every store in `config.ts` is built on first use.
  */
 function grants(): JsonStore<GrantRecord> {
-  return (store ??= new JsonStore<GrantRecord>('extensions.json', { granted: [] }))
+  if (store) return store
+  store = new JsonStore<GrantRecord>('extensions.json', { granted: [], seeded: false })
+  if (!store.get().seeded) {
+    // Union rather than overwrite: on a fresh install `granted` is empty, but a
+    // hand-edited file must not lose what it already says.
+    const current = new Set(listGrantsFrom(store))
+    for (const key of SEEDED_GRANTS) current.add(key)
+    store.set({ granted: [...current], seeded: true })
+  }
+  return store
+}
+
+function listGrantsFrom(from: JsonStore<GrantRecord>): string[] {
+  const raw = from.get().granted
+  return Array.isArray(raw) ? raw.filter((entry) => typeof entry === 'string') : []
 }
 
 export function listGrants(): string[] {
-  const raw = grants().get().granted
-  // Defensive: this file is user-editable, and a hand-edited array of nulls should cost
-  // a permission rather than a crash on boot.
-  return Array.isArray(raw) ? raw.filter((entry) => typeof entry === 'string') : []
+  // Defensive inside `listGrantsFrom`: this file is user-editable, and a hand-edited
+  // array of nulls should cost a permission rather than a crash on boot.
+  return listGrantsFrom(grants())
 }
 
 export function setGrant(key: string, granted: boolean): string[] {

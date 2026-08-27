@@ -37,6 +37,7 @@ import { getDeviceId, getDeviceName, setDeviceName } from './device'
 import { setGrant } from './extensions/grants'
 import { extensionRegistry } from './extensions/registry'
 import * as infra from './infra'
+import { listNicknames, setNickname } from './nicknames'
 import {
   deleteCredential,
   isVaultAvailable as isCredentialVaultAvailable,
@@ -469,6 +470,12 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
         args: request.args,
       })
     },
+  )
+
+  ipcMain.handle(IPC.DEVICE_NICKNAMES, () => listNicknames())
+
+  ipcMain.handle(IPC.DEVICE_SET_NICKNAME, (_e, deviceId: string, nickname: string) =>
+    setNickname(deviceId, nickname),
   )
 
   ipcMain.handle(IPC.EXTENSIONS_LIST, () => extensionRegistry.describe())

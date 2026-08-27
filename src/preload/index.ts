@@ -500,6 +500,15 @@ const api = {
       ipcRenderer.send(IPC.DEVICE_CONTROL, { id, deviceId, action, args })
       return id
     },
+    /**
+     * What this machine calls the other machines. Local and display-only: Amber never
+     * sees a nickname, so renaming *this* machine goes through `rename` above instead,
+     * which re-announces and teaches her the name for real.
+     */
+    nicknames: (): Promise<Record<string, string>> =>
+      ipcRenderer.invoke(IPC.DEVICE_NICKNAMES),
+    setNickname: (deviceId: string, nickname: string): Promise<Record<string, string>> =>
+      ipcRenderer.invoke(IPC.DEVICE_SET_NICKNAME, deviceId, nickname),
   },
 
   extensions: {

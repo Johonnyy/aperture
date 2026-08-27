@@ -96,6 +96,9 @@ export const IPC = {
    * here would mean a button that appears to hang.
    */
   DEVICE_CONTROL: 'device:control',
+  /** What this machine calls the other machines. Local, never announced. */
+  DEVICE_NICKNAMES: 'device:nicknames',
+  DEVICE_SET_NICKNAME: 'device:set-nickname',
 
   /** What is installed, what it may do, and which permissions have been granted. */
   EXTENSIONS_LIST: 'extensions:list',

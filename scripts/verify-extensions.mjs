@@ -22,6 +22,7 @@ import {
   findAction,
   grantKey,
   isAllowed,
+  needsApproval,
   parseCapabilityKey,
   permissionFor,
   summarize,
@@ -114,6 +115,84 @@ for (const key of declared) {
 
   if (isAllowed(MANIFESTS, [grantKey('system-control', 'power')], 'system-control.nope')) {
     fail('isAllowed accepted an action no manifest declares')
+  }
+}
+
+// --- the approval gate asks for the right things, and nothing else -----------
+//
+// Over-asking is the failure mode worth testing for: every needless prompt is one more
+// dialog someone learns to click through without reading, which costs the prompts that
+// matter. `confirmBeforeExec` is the *SSH* preference ("ask before Amber runs a shell
+// command on a server"); applying it to device actions made a volume slider stop and ask.
+{
+  const cases = [
+    // [isDeviceAction, destructive, confirmBeforeExec, expected, what]
+    [true, false, false, false, 'setting the volume'],
+    [true, false, true, false, 'setting the volume with the SSH preference on'],
+    [true, true, false, true, 'sleeping the machine'],
+    [true, true, true, true, 'sleeping the machine with the SSH preference on'],
+    [false, false, false, false, 'an SSH command with the preference off'],
+    [false, false, true, true, 'an SSH command with the preference on'],
+  ]
+  for (const [isDeviceAction, destructive, confirmBeforeExec, expected, what] of cases) {
+    const got = needsApproval({ isDeviceAction, destructive, confirmBeforeExec })
+    if (got !== expected) {
+      fail(`${what}: needsApproval returned ${got}, expected ${expected}`)
+    }
+  }
+
+  // Stated as a property, because it is the one that regressed: no non-destructive
+  // device action may ever prompt, whatever the settings say.
+  for (const manifest of MANIFESTS) {
+    for (const action of manifest.actions) {
+      if ((action.expose ?? 'device') === 'tool') continue
+      if (action.destructive) continue
+      for (const confirmBeforeExec of [true, false]) {
+        if (needsApproval({ isDeviceAction: true, destructive: false, confirmBeforeExec })) {
+          fail(`${capabilityKey(manifest.id, action.name)} would prompt, and it is not ` +
+            `destructive — the panel exists so a tap goes straight through`)
+        }
+      }
+    }
+  }
+}
+
+// --- an upgrade must not silently revoke a capability that already worked -----
+//
+// SSH shipped before this consent screen existed, so introducing one that starts empty
+// took `run_command` away: `register_tools` went out as `[]` and Amber simply stopped
+// being able to run commands, with nothing anywhere saying why. `grants.ts` seeds those
+// permissions once, on first run. This asserts the seed still covers everything
+// ssh-terminal needs — a permission added to that manifest without being added to
+// SEEDED_GRANTS would reintroduce exactly the same silent breakage.
+{
+  const seeded = ['ssh-terminal:pty', 'ssh-terminal:secrets']
+  const ssh = MANIFESTS.find((m) => m.id === 'ssh-terminal')
+  if (!ssh) {
+    fail('ssh-terminal manifest is missing')
+  } else {
+    for (const permission of ssh.permissions) {
+      if (!seeded.includes(grantKey('ssh-terminal', permission))) {
+        fail(`ssh-terminal declares "${permission}" but grants.ts does not seed it — an ` +
+          `upgrade would silently revoke SSH`)
+      }
+    }
+    const { specs } = toolSpecsFor(MANIFESTS, 'win32', (key) =>
+      isAllowed(MANIFESTS, seeded, key),
+    )
+    if (!specs.some((spec) => spec.name === 'run_command')) {
+      fail('run_command is not declared to Amber under the seeded grants — SSH is broken')
+    }
+  }
+
+  // The other half: powering the machine off is genuinely new, so it must NOT be
+  // seeded. A seed that quietly granted it would be a consent screen that never asked.
+  const seededCaps = capabilitiesFor(MANIFESTS, 'win32', (key) =>
+    isAllowed(MANIFESTS, seeded, key),
+  )
+  if (seededCaps.length) {
+    fail(`the first-run seed announces ${seededCaps.map((c) => c.action).join(', ')} — ` +
+      `new capabilities must start ungranted and ask`)
   }
 }
 

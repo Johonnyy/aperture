@@ -1,6 +1,6 @@
 import type { ToolCallFrame } from '../../shared/protocol'
 import type { ApertureEvent, PendingApproval } from '../../shared/types'
-import { findAction } from '../../shared/extensions'
+import { findAction, needsApproval } from '../../shared/extensions'
 import { getSettings, listServers } from '../config'
 import { extensionRegistry } from '../extensions/registry'
 import type { AmberConnection } from './connection'
@@ -166,13 +166,17 @@ export class ToolBridge {
 
     // --- the confirmation gate ---
     //
-    // Two independent reasons to ask, and they are not the same question. `destructive`
-    // is the action's own declaration and always asks — Amber gates it on her side too,
-    // but only on the conversational path, so this covers a panel tap on another device.
-    // `confirmBeforeExec` is the user's blanket preference for anything Amber initiates.
-    const isDestructive = Boolean(found.action.destructive)
-    const needsApproval = isDestructive || getSettings().confirmBeforeExec
-    if (needsApproval) {
+    // The rule is in `shared/extensions.ts` so it can be tested; the short version is
+    // that a device action asks only when it declares itself destructive, and
+    // `confirmBeforeExec` applies to SSH commands alone. Setting the volume must not
+    // stop and ask — the panel exists so a tap goes straight through.
+    if (
+      needsApproval({
+        isDeviceAction: Boolean(frame.device_id),
+        destructive: Boolean(found.action.destructive),
+        confirmBeforeExec: getSettings().confirmBeforeExec,
+      })
+    ) {
       const timeout = frame.device_id ? DEVICE_APPROVAL_TIMEOUT_MS : APPROVAL_TIMEOUT_MS
       const label = describe(key, frame.input)
       this.trace('warn', 'approval requested', label)

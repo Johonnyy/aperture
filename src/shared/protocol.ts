@@ -589,6 +589,9 @@ export interface DeviceCapability {
   description?: string
   destructive?: boolean
   input_schema?: Record<string, unknown>
+  /** How the declaring device would like this drawn. Amber carries it opaquely; a
+   *  client that doesn't understand it infers from `input_schema` instead. */
+  control?: Record<string, unknown>
 }
 
 /** A device Amber can currently reach. Never carries a session id — see `DeviceListFrame`. */

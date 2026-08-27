@@ -26,17 +26,26 @@
 import type { TargetPlatform } from '../../../shared/extensions'
 import { UnsupportedPlatformError, type Command } from './commands'
 
+export {
+  describeAudio,
+  parseAudioState,
+  parseVolume,
+  type AudioState,
+} from '../../../shared/audio-state'
+
 /** The env var the Windows script reads its target level out of. */
 export const VOLUME_ENV = 'APERTURE_VOLUME'
-/** The env var the Windows script reads its mute state out of (`1` / `0`). */
-export const MUTE_ENV = 'APERTURE_MUTE'
 
 /**
- * One C# interop, three entry points, selected by which env vars are set.
+ * One C# interop for both reading and setting, selected by whether the env var is set.
  *
- * Kept as a single constant rather than three near-identical ones: the `Add-Type` block
- * is the bulk of it and duplicating it three times is how two of the copies eventually
- * drift.
+ * Kept as a single constant rather than two near-identical ones: the `Add-Type` block is
+ * the bulk of it, and duplicating it is how one copy eventually drifts.
+ *
+ * Setting a level also **clears OS mute**. Nothing in Aperture sets that flag any more —
+ * mute is level zero — but Windows remembers it independently, so a machine muted by
+ * anything else would swallow every volume change and the slider would appear broken.
+ * Clearing it makes "set the volume" mean "and I can hear it".
  */
 const WINDOWS_AUDIO_SCRIPT = `
 $ErrorActionPreference = 'Stop'
@@ -50,7 +59,6 @@ interface IAudioEndpointVolume {
   int GetMasterVolumeLevelScalar(out float pfLevel);
   int k(); int l(); int m(); int n();
   int SetMute([MarshalAs(UnmanagedType.Bool)] bool bMute, System.Guid pguidEventContext);
-  int GetMute(out bool pbMute);
 }
 [Guid("D666063F-1587-4E43-81F1-B948E807363F"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
 interface IMMDevice { int Activate(ref System.Guid id, int clsCtx, int activationParams, out IAudioEndpointVolume aev); }
@@ -69,12 +77,10 @@ public class Audio {
   }
   public static float Get() { float v; Marshal.ThrowExceptionForHR(Vol().GetMasterVolumeLevelScalar(out v)); return v; }
   public static void Set(float v) { Marshal.ThrowExceptionForHR(Vol().SetMasterVolumeLevelScalar(v, System.Guid.Empty)); }
-  public static bool GetMute() { bool m; Marshal.ThrowExceptionForHR(Vol().GetMute(out m)); return m; }
   public static void SetMute(bool m) { Marshal.ThrowExceptionForHR(Vol().SetMute(m, System.Guid.Empty)); }
 }
 '@
-if ($env:${MUTE_ENV}) { [Audio]::SetMute($env:${MUTE_ENV} -eq '1') }
-if ($env:${VOLUME_ENV}) { [Audio]::Set([int]$env:${VOLUME_ENV} / 100.0) }
+if ($env:${VOLUME_ENV}) { [Audio]::SetMute($false); [Audio]::Set([int]$env:${VOLUME_ENV} / 100.0) }
 [int][math]::Round([Audio]::Get() * 100)
 `.trim()
 
@@ -95,7 +101,9 @@ export function getVolumeCommand(platform: TargetPlatform): Command & { env?: Re
     case 'win32':
       return { file: 'powershell.exe', args: POWERSHELL_ARGS }
     case 'darwin':
-      return { file: 'osascript', args: ['-e', 'output volume of (get volume settings)'] }
+      // `get volume settings` reports level and mute together, which is why the whole
+      // line is returned rather than just the level — one read answers both.
+      return { file: 'osascript', args: ['-e', 'get volume settings'] }
     case 'linux':
       return { file: 'pactl', args: ['get-sink-volume', '@DEFAULT_SINK@'] }
     default:
@@ -126,40 +134,3 @@ export function setVolumeCommand(
   }
 }
 
-export function muteCommand(
-  platform: TargetPlatform,
-  muted: boolean,
-): Command & { env?: Record<string, string> } {
-  switch (platform) {
-    case 'win32':
-      return {
-        file: 'powershell.exe',
-        args: POWERSHELL_ARGS,
-        env: { [MUTE_ENV]: muted ? '1' : '0' },
-      }
-    case 'darwin':
-      return {
-        file: 'osascript',
-        args: ['-e', `set volume ${muted ? 'with' : 'without'} output muted`],
-      }
-    case 'linux':
-      return { file: 'pactl', args: ['set-sink-mute', '@DEFAULT_SINK@', muted ? '1' : '0'] }
-    default:
-      throw new UnsupportedPlatformError('mute', platform)
-  }
-}
-
-/**
- * Pull a percentage out of whatever the platform printed.
- *
- * Windows and macOS print a bare number; `pactl` prints a whole line with the level
- * appearing twice (left and right channel). Taking the **first** percentage is right for
- * all three, and returning `null` rather than a guess matters — a wrong number reported
- * confidently is worse than "couldn't read it".
- */
-export function parseVolume(output: string): number | null {
-  const match = output.match(/(\d{1,3})\s*%/) ?? output.match(/^\s*(\d{1,3})\s*$/m)
-  if (!match) return null
-  const value = Number(match[1])
-  return Number.isFinite(value) && value >= 0 && value <= 100 ? value : null
-}

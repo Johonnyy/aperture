@@ -23,17 +23,22 @@ import {
 import {
   clampVolume,
   getVolumeCommand,
-  muteCommand,
   parseVolume,
   setVolumeCommand,
   VOLUME_ENV,
 } from '../out/verify/system-audio.mjs'
-import { closeAppCommand, listAppsCommand, parseApps } from '../out/verify/system-apps.mjs'
 import {
+  closeAppCommand,
+  listAppsCommand,
+  parseApps as parseAppsOutput,
+} from '../out/verify/system-apps.mjs'
+import { describeAudio, isMuted, parseAudioState } from '../out/verify/audio-state.mjs'
+import {
+  asControlSpec,
   controlFor,
-  controlsFor,
-  extensionLabel,
-  groupByExtension,
+  isEmpty,
+  parseApps,
+  surfaceFor,
 } from '../out/verify/device-controls.mjs'
 
 let failures = 0
@@ -146,8 +151,7 @@ for (const platform of PLATFORMS) {
   for (const [label, command] of [
     ['get', getVolumeCommand(platform)],
     ['set', setVolumeCommand(platform, 42)],
-    ['mute', muteCommand(platform, true)],
-    ['unmute', muteCommand(platform, false)],
+    ['mute', setVolumeCommand(platform, 0)],
   ]) {
     if (!command.file || !Array.isArray(command.args)) {
       fail(`audio ${label} on ${platform} is malformed`)
@@ -248,12 +252,12 @@ for (const platform of PLATFORMS) {
     '"notepad.exe","2","Console","1","2,000 K"',
     '"code.exe","3","Console","1","9 K"',
   ].join('\r\n')
-  const windows = parseApps('win32', csv)
+  const windows = parseAppsOutput('win32', csv)
   if (JSON.stringify(windows) !== JSON.stringify(['code.exe', 'notepad.exe'])) {
     fail(`parseApps(win32) = ${JSON.stringify(windows)}; expected deduped, sorted names`)
   }
 
-  const unix = parseApps(
+  const unix = parseAppsOutput(
     'darwin',
     ['/usr/bin/ssh', '/Applications/Spotify.app/Contents/MacOS/Spotify', '/usr/bin/ssh'].join('\n'),
   )
@@ -262,77 +266,181 @@ for (const platform of PLATFORMS) {
   }
 
   const many = Array.from({ length: 200 }, (_, i) => `p${i}`).join('\n')
-  if (parseApps('linux', many).length > 40) fail('parseApps did not cap its output')
+  if (parseAppsOutput('linux', many).length > 40) fail('parseApps did not cap its output')
 }
 
 // --- the panel is generated from capabilities, not hardcoded ------------------
 //
 // Each rule below has a wrong answer that renders a confident, misleading control rather
-// than failing — a cheerful toggle labelled "Shutdown", or a slider with no bounds.
+// than failing: a cheerful toggle labelled "Shutdown", a slider with no range, or an
+// audio section on a machine that never offered audio.
 
 {
+  const AUDIO = [
+    { action: 'system-control.audio.get_volume' },
+    { action: 'system-control.audio.set_volume' },
+    { action: 'system-control.audio.mute' },
+  ]
+  const POWER = [
+    { action: 'system-control.power.shutdown', destructive: true },
+    { action: 'system-control.power.sleep', destructive: true },
+  ]
+
+  const full = surfaceFor([...AUDIO, ...POWER, { action: 'system-control.process.list' }])
+  if (!full.audio?.canRead || !full.audio.canSet || !full.audio.canMute) {
+    fail(`audio surface misread: ${JSON.stringify(full.audio)}`)
+  }
+  if (!full.apps?.canList || full.apps.canClose || full.apps.canLaunch) {
+    fail(`apps surface misread: ${JSON.stringify(full.apps)}`)
+  }
+  // Sleep before shutdown: the reversible one first, so the more destructive button is
+  // never the one nearest whatever you were reaching for.
+  const order = full.power.map((p) => p.action).join()
+  if (order !== 'system-control.power.sleep,system-control.power.shutdown') {
+    fail(`power order is ${order}; sleep must come first`)
+  }
+  // A capability drawn bespoke must not ALSO appear as a generic row, or the card grows
+  // two of every control.
+  if (full.other.length !== 0) {
+    fail(`known capabilities leaked into the generic bucket: ${full.other.map((o) => o.action)}`)
+  }
+
+  // A device this build has never heard of still renders. This is the property that
+  // keeps the panel honest for Aperture mobile and for TouchDesigner.
+  const foreign = surfaceFor([{ action: 'notify.toast' }, { action: 'td.trigger' }])
+  if (foreign.audio || foreign.apps || foreign.power.length) {
+    fail('a foreign device produced bespoke sections it never announced')
+  }
+  if (foreign.other.length !== 2) {
+    fail(`a foreign device rendered ${foreign.other.length} controls; expected 2`)
+  }
+  if (foreign.other[0].label !== 'Toast') {
+    fail(`fallback label was "${foreign.other[0].label}"; expected "Toast"`)
+  }
+
+  if (!isEmpty(surfaceFor([]))) fail('a device with no capabilities did not read as empty')
+  if (isEmpty(foreign)) fail('a device with capabilities read as empty')
+
+  // --- inference, for a capability that declared no control ---
   const destructive = controlFor({ action: 'system-control.power.shutdown', destructive: true })
   if (destructive.kind !== 'button' || destructive.tone !== 'danger') {
-    fail(`a destructive capability rendered as ${JSON.stringify(destructive)} — the weight ` +
-      `of the control must match the consequence`)
+    fail(`a destructive capability rendered as ${JSON.stringify(destructive)}`)
   }
-
-  // Destructive wins over shape: a bounded number on a destructive action must not
-  // become a slider you can drag into shutting the machine down.
-  const destructiveWithArgs = controlFor({
-    action: 'system-control.power.shutdown',
-    destructive: true,
-    input_schema: { properties: { delay: { type: 'number', minimum: 0, maximum: 60 } } },
-  })
-  if (destructiveWithArgs.kind !== 'button') {
-    fail(`a destructive capability with a numeric argument became a ${destructiveWithArgs.kind}`)
-  }
-
-  const bare = controlFor({ action: 'notify.toast' })
-  if (bare.kind !== 'button' || bare.label !== 'Toast') {
-    fail(`a bare capability rendered as ${JSON.stringify(bare)}; expected a "Toast" button`)
-  }
-
   const slider = controlFor({
-    action: 'system-control.audio.set_volume',
+    action: 'ext.set_level',
     input_schema: { properties: { level: { type: 'number', minimum: 0, maximum: 100 } } },
   })
   if (slider.kind !== 'slider' || slider.arg !== 'level' || slider.max !== 100) {
     fail(`a bounded number did not become a slider: ${JSON.stringify(slider)}`)
   }
-
-  // An *unbounded* number must not become a slider — there would be no range to draw.
   const unbounded = controlFor({
-    action: 'system-control.audio.set_volume',
+    action: 'ext.set_level',
     input_schema: { properties: { level: { type: 'number' } } },
   })
   if (unbounded.kind === 'slider') fail('an unbounded number became a slider with no range')
-
   const toggle = controlFor({
-    action: 'system-control.audio.mute',
+    action: 'ext.mute',
     input_schema: { properties: { on: { type: 'boolean' } } },
   })
   if (toggle.kind !== 'toggle' || toggle.arg !== 'on') {
     fail(`a boolean did not become a toggle: ${JSON.stringify(toggle)}`)
   }
 
-  const groups = groupByExtension(
-    controlsFor([
-      { action: 'system-control.power.sleep', destructive: true },
-      { action: 'system-control.power.shutdown', destructive: true },
-      { action: 'notify.toast' },
-    ]),
-  )
-  if (groups.length !== 2) fail(`groupByExtension produced ${groups.length} groups; expected 2`)
-  // Grouping must split on the FIRST dot too, or `system-control.power.*` lands under an
-  // extension called `system-control.power` and the card grows a phantom section.
-  if (groups[0].extensionId !== 'system-control' || groups[0].controls.length !== 2) {
-    fail(`grouping split on the wrong dot: ${JSON.stringify(groups.map((g) => g.extensionId))}`)
+  // --- a control hint from the wire is untrusted data, not a ControlSpec ---
+  //
+  // It arrives from another machine. Every shape below renders something silently broken
+  // if taken at face value, so each must be refused and fall back to inference.
+  for (const bad of [
+    null,
+    'slider',
+    {},
+    { kind: 'slider', label: 'V' },
+    { kind: 'slider', label: 'V', arg: 'level', min: 0 },
+    { kind: 'slider', label: 'V', arg: 'level', min: 100, max: 0 },
+    { kind: 'telepathy', label: 'V' },
+    { kind: 'toggle', label: '' },
+  ]) {
+    if (asControlSpec(bad, false) !== null) {
+      fail(`asControlSpec accepted ${JSON.stringify(bad)}`)
+    }
   }
-  if (extensionLabel('system-control') !== 'System control') {
-    fail(`extensionLabel produced "${extensionLabel('system-control')}"`)
+  const good = asControlSpec(
+    { kind: 'slider', label: 'Volume', arg: 'level', min: 0, max: 100 },
+    false,
+  )
+  if (good?.kind !== 'slider' || good.label !== 'Volume') {
+    fail(`asControlSpec rejected a valid hint: ${JSON.stringify(good)}`)
+  }
+  // A destructive capability may never be drawn as anything but a danger button, whatever
+  // the remote machine asked for.
+  const coerced = asControlSpec({ kind: 'toggle', label: 'Shut down', arg: 'on' }, true)
+  if (coerced?.kind !== 'button' || coerced.tone !== 'danger') {
+    fail(`a destructive capability was allowed a ${coerced?.kind} control`)
   }
 }
+
+// --- the audio state contract, in both directions -----------------------------
+//
+// `describeAudio` is prose the model reads AND the string the panel parses a level back
+// out of, because a tool_result is a string and a reading has nowhere else to travel. If
+// the two drift, the slider silently stops reflecting the machine.
+
+{
+  for (const [output, level, what] of [
+    ['67', 67, 'windows'],
+    ['0', 0, 'windows, silent'],
+    ['output volume:67, input volume:75, alert volume:100, output muted:false', 67, 'macos'],
+    // The label has to be matched, not the first number: `input volume` would otherwise
+    // win on a machine whose input is louder than its output.
+    ['output volume:12, input volume:75, alert volume:100, output muted:true', 12, 'macos'],
+    ['Volume: front-left: 43417 /  67% / -10.5 dB', 67, 'linux'],
+    ['  75  ', 75, 'a bare number'],
+    ['nothing useful', null, 'unreadable'],
+    ['999', null, 'out of range'],
+  ]) {
+    const state = parseAudioState(output)
+    if (state.level !== level) {
+      fail(`parseAudioState(${what}) = ${JSON.stringify(state)}; expected level ${level}`)
+    }
+  }
+
+  // The round trip. This is the assertion that catches a reworded message.
+  for (const level of [0, 1, 42, 67, 100]) {
+    const back = parseAudioState(describeAudio({ level }))
+    if (back.level !== level) {
+      fail(`describeAudio({level:${level}}) does not parse back: ` +
+        `"${describeAudio({ level })}" gave ${JSON.stringify(back)}`)
+    }
+  }
+
+  // An unreadable level must never parse back as a number: a slider at 0 looks exactly
+  // like a machine that is genuinely silent, and the two need different treatment.
+  if (parseAudioState(describeAudio({ level: null })).level !== null) {
+    fail('an unreadable level parsed back as a number')
+  }
+
+  // Mute is level zero, and nothing else. If these ever diverge, the speaker button and
+  // the slider start disagreeing about the same machine.
+  if (!isMuted({ level: 0 })) fail('level 0 did not read as muted')
+  for (const level of [1, 42, 100]) {
+    if (isMuted({ level })) fail(`level ${level} read as muted`)
+  }
+  // A failed read is not silence.
+  if (isMuted({ level: null })) fail('an unreadable level read as muted')
+}
+
+// --- the running-apps contract ------------------------------------------------
+
+{
+  const parsed = parseApps('Running: code.exe, notepad.exe, spotify.exe.')
+  if (JSON.stringify(parsed) !== JSON.stringify(['code.exe', 'notepad.exe', 'spotify.exe'])) {
+    fail(`parseApps returned ${JSON.stringify(parsed)}`)
+  }
+  if (parseApps('Nothing readable is running.').length !== 0) {
+    fail('parseApps invented entries from a non-list message')
+  }
+}
+
 
 if (failures) {
   console.error(`\nverify-devices: ${failures} problem(s)`)

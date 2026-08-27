@@ -130,6 +130,16 @@ export interface DeviceCapability {
   description?: string
   destructive?: boolean
   input_schema?: Record<string, unknown>
+  /**
+   * How the declaring device would like this drawn.
+   *
+   * Travels over the wire alongside `destructive`, and for the same reason: the device
+   * that implements an action knows best how it should be presented, and a panel that
+   * inferred everything would have to be updated for each new capability. Amber carries
+   * it opaquely. A receiver that doesn't understand it falls back to inference from
+   * `input_schema`, so this is a hint rather than a requirement.
+   */
+  control?: ControlSpec
 }
 
 /** One tool as it goes out on `register_tools`. Bare name — Amber prefixes it. */
@@ -191,6 +201,7 @@ export function capabilitiesFor(
       const capability: DeviceCapability = { action: key, description: action.description }
       if (action.destructive) capability.destructive = true
       if (action.input_schema) capability.input_schema = action.input_schema
+      if (action.control) capability.control = action.control
       out.push(capability)
     }
   }
@@ -286,6 +297,35 @@ export function permissionFor(
   // Single-permission extensions (ssh-terminal declares pty + secrets for one action)
   // consume all of them, so the whole manifest is one grant decision.
   return manifest.permissions[0] ?? null
+}
+
+/**
+ * Whether this dispatch has to stop and ask a human first.
+ *
+ * Pure, and extracted here rather than left inline in the bridge, because getting it
+ * wrong is silent in the direction that matters: too many prompts and every one becomes
+ * something you click through without reading, which is worse than none.
+ *
+ * The two surfaces answer to different things, and conflating them was a real bug —
+ * a volume slider was prompting:
+ *
+ * - **Device actions** are gated by the action's own `destructive` flag and nothing
+ *   else. Setting the volume, listing apps, opening a file: no prompt, ever. The point
+ *   of the panel is that a tap goes straight to the machine.
+ * - **Client tools** (the `register_tools` surface, i.e. SSH `run_command`) honour the
+ *   user's `confirmBeforeExec` preference, exactly as they did before extensions
+ *   existed. That setting means "ask before Amber runs a shell command on a server" —
+ *   it was never about this machine's volume, and applying it to device actions was
+ *   reading a setting as though it said something more general than it does.
+ */
+export function needsApproval(options: {
+  /** True when the call arrived addressed to a device (the frame carried `device_id`). */
+  isDeviceAction: boolean
+  destructive: boolean
+  /** The user's SSH preference. Irrelevant to device actions. */
+  confirmBeforeExec: boolean
+}): boolean {
+  return options.isDeviceAction ? options.destructive : options.confirmBeforeExec
 }
 
 /**

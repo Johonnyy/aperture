@@ -84,7 +84,7 @@
     },
     {
       "name": "audio.mute",
-      "description": "Mute or unmute this machine's output.",
+      "description": "Mute or unmute this machine by taking the volume to zero and putting it back where it was. Unmuting after a restart of Aperture lands on a modest default, since there is nothing to restore to.",
       "timeoutMs": 6000,
       "platforms": [
         "win32",

@@ -62,7 +62,17 @@ export function App(): React.JSX.Element {
           {/* Unmounted like Keys and Settings, not kept alive like Chat: it holds no
               connection and no scroll worth preserving, and it should re-read the live
               device list on every visit rather than showing what was true last time. */}
-          {view === 'devices' && <DevicesView />}
+          {view === 'devices' && (
+            <DevicesView
+              onOpenExtensions={() => {
+                // The Settings view reads its opening page from this key on mount, so
+                // writing it before navigating is the deep link. Same mechanism it uses
+                // to remember where you were.
+                localStorage.setItem('aperture.settings.page', 'extensions')
+                setView('settings')
+              }}
+            />
+          )}
           {view === 'keys' && <KeysView />}
           {view === 'settings' && <SettingsView />}
 

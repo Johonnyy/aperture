@@ -27,15 +27,16 @@
 import { execFile } from 'node:child_process'
 import { shell } from 'electron'
 
+import type { AudioState } from '../../shared/audio-state'
 import type { TargetPlatform } from '../../shared/extensions'
 import { appendAudit, getServer, listServers } from '../config'
 import { exec } from '../ssh/ssh-client'
 import type { ImplementedKey } from './index'
 import {
   clampVolume,
+  describeAudio,
   getVolumeCommand,
-  muteCommand,
-  parseVolume,
+  parseAudioState,
   setVolumeCommand,
 } from './system-control/audio'
 import { closeAppCommand, listAppsCommand, parseApps } from './system-control/apps'
@@ -144,6 +145,37 @@ function powerAction(
   }
 }
 
+/**
+ * The level this machine was at before it was muted.
+ *
+ * In memory rather than on disk, and that is a judgement rather than an oversight: it is
+ * only meaningful while a mute is in effect, and a mute that survived a restart of
+ * Aperture would be a machine sitting silently with no visible reason. If the process
+ * does restart while muted, unmuting lands on `DEFAULT_UNMUTE_LEVEL` — audible, modest,
+ * and obviously a fallback rather than a value anyone chose.
+ */
+let levelBeforeMute: number | null = null
+const DEFAULT_UNMUTE_LEVEL = 30
+
+async function readLevel(ctx: ActionContext): Promise<number | null> {
+  const built = build(() => getVolumeCommand(ctx.platform))
+  if ('error' in built) return null
+  const { file, args, env } = built.value
+  const result = await run(file, args, ctx.timeoutMs, env)
+  return result.ok ? parseAudioState(result.output).level : null
+}
+
+async function writeLevel(
+  ctx: ActionContext,
+  level: number,
+): Promise<{ ok: boolean; state: AudioState; detail: string }> {
+  const built = build(() => setVolumeCommand(ctx.platform, level))
+  if ('error' in built) return { ok: false, state: { level: null }, detail: built.error.message }
+  const { file, args, env } = built.value
+  const result = await run(file, args, ctx.timeoutMs, env)
+  return { ok: result.ok, state: parseAudioState(result.output), detail: result.detail }
+}
+
 export const HANDLERS: Record<ImplementedKey, ActionHandler> = {
   'ssh-terminal.run_command': async (args, ctx) => {
     const command = String(args.command ?? '').trim()
@@ -184,39 +216,63 @@ export const HANDLERS: Record<ImplementedKey, ActionHandler> = {
   ),
 
   'system-control.audio.get_volume': async (_args, ctx) => {
-    const built = build(() => getVolumeCommand(ctx.platform))
-    if ('error' in built) return built.error
-    const { file, args, env } = built.value
-    const result = await run(file, args, ctx.timeoutMs, env)
-    if (!result.ok) return { message: `Couldn't read the volume: ${result.detail}`, isError: true }
-    const level = parseVolume(result.output)
-    // A number we couldn't parse is reported as unreadable rather than guessed at — a
-    // confident wrong percentage is worse than admitting the read failed.
+    // A reading we couldn't parse is reported as unreadable rather than guessed at — a
+    // confident wrong percentage is worse than admitting the read failed, and the panel
+    // shows a dash rather than parking its slider at zero, which would look like silence.
+    const level = await readLevel(ctx)
     return level === null
-      ? { message: `Couldn't make sense of the volume reading.`, isError: true }
-      : { message: `The volume is at ${level}%.` }
+      ? { message: `Couldn't read the volume.`, isError: true }
+      : { message: describeAudio({ level }) }
   },
 
   'system-control.audio.set_volume': async (args, ctx) => {
     const level = clampVolume(args.level)
-    const built = build(() => setVolumeCommand(ctx.platform, level))
-    if ('error' in built) return built.error
-    const { file, args: argv, env } = built.value
-    const result = await run(file, argv, ctx.timeoutMs, env)
-    return result.ok
-      ? { message: `Volume set to ${level}%.` }
-      : { message: `Couldn't set the volume: ${result.detail}`, isError: true }
+    const wrote = await writeLevel(ctx, level)
+    if (!wrote.ok) {
+      return { message: `Couldn't set the volume: ${wrote.detail}`, isError: true }
+    }
+    // Moving the slider away from zero is an unmute, so the remembered level is spent —
+    // otherwise a later unmute would jump back to a value from before you last adjusted it.
+    if (level > 0) levelBeforeMute = null
+    // Every platform's set command re-reports the resulting level, so the answer says
+    // what is true now rather than what was asked for. Those differ more often than you
+    // would think: a clamped value, or a device that quantises to steps.
+    return { message: describeAudio(wrote.state.level === null ? { level } : wrote.state) }
   },
 
+  /**
+   * Mute is **level zero**, not the OS mute flag.
+   *
+   * The flag was a second source of truth for one question, and the two could disagree:
+   * volume 67 and silence, or volume 0 reported as "not muted". It also had to be read
+   * back three different ways per platform, and Linux does not report it at all. Setting
+   * the level to zero has none of that: one value, one control, and the slider and the
+   * speaker button cannot contradict each other because they read the same number.
+   *
+   * The cost is that unmuting has to remember where the level was, which is what
+   * `levelBeforeMute` is for.
+   */
   'system-control.audio.mute': async (args, ctx) => {
     const muted = Boolean(args.muted)
-    const built = build(() => muteCommand(ctx.platform, muted))
-    if ('error' in built) return built.error
-    const { file, args: argv, env } = built.value
-    const result = await run(file, argv, ctx.timeoutMs, env)
-    return result.ok
-      ? { message: muted ? 'Muted.' : 'Unmuted.' }
-      : { message: `Couldn't change the mute state: ${result.detail}`, isError: true }
+
+    if (muted) {
+      // Read first: muting has to know what to come back to. A failed read is not fatal
+      // — better to mute and restore to the fallback than to refuse to mute at all.
+      const current = await readLevel(ctx)
+      if (current !== null && current > 0) levelBeforeMute = current
+      const wrote = await writeLevel(ctx, 0)
+      return wrote.ok
+        ? { message: 'Muted.' }
+        : { message: `Couldn't mute: ${wrote.detail}`, isError: true }
+    }
+
+    const restore = levelBeforeMute ?? DEFAULT_UNMUTE_LEVEL
+    const wrote = await writeLevel(ctx, restore)
+    if (!wrote.ok) {
+      return { message: `Couldn't unmute: ${wrote.detail}`, isError: true }
+    }
+    levelBeforeMute = null
+    return { message: describeAudio(wrote.state.level === null ? { level: restore } : wrote.state) }
   },
 
   'system-control.process.list': async (_args, ctx) => {
