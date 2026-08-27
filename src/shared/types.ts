@@ -1,6 +1,7 @@
 /** Types shared across main, preload and renderer — the IPC vocabulary. */
 
 import type { BloomLink, BloomRunEvent } from './bloom'
+import type { ExtensionSummary } from './extensions'
 import type { AudioChunkFrame, ServerFrame } from './protocol'
 import { DEFAULT_THEME, type ThemeId } from './theme'
 
@@ -39,6 +40,12 @@ export type ApertureEvent =
   | { kind: 'trace'; entry: TraceEntry }
   /** The full set of commands waiting on a human — replaces the previous set. */
   | { kind: 'approvals'; pending: PendingApproval[] }
+  /**
+   * What is installed and what it is allowed to do. The whole picture every time, like
+   * `bloom-link` — a delta could leave the Settings page showing a permission as granted
+   * after it was revoked, which is the one thing a consent screen must never do.
+   */
+  | { kind: 'extensions'; summaries: ExtensionSummary[] }
   /** One narrated step of a long-running operation (see `OpLogEntry`). */
   | { kind: 'op'; opId: string; entry: OpLogEntry }
   | { kind: 'op-done'; opId: string; ok: boolean; error?: string }
@@ -166,8 +173,20 @@ export interface AuditEntry {
 /** A tool call waiting on a human. Surfaced in the Status Panel. */
 export interface PendingApproval {
   id: string
-  server: string
-  command: string
+  /**
+   * What is waiting to be approved — a capability key like `ssh-terminal.run_command`
+   * or `system-control.power.shutdown`.
+   *
+   * Widened from the old `{server, command}` pair when the bridge stopped being
+   * SSH-only. `server` and `command` survive as optional fields so the existing card
+   * can keep showing a command the way it always has, rather than every approval
+   * collapsing to a generic line the day a second capability shipped.
+   */
+  action: string
+  /** One line describing the arguments, already rendered for display. */
+  detail: string
+  server?: string
+  command?: string
   requestedAt: number
   /** Wall-clock deadline; past it the bridge answers Amber itself. */
   expiresAt: number

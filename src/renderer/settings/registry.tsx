@@ -25,6 +25,7 @@ import { Appearance } from './pages/Appearance'
 import { Bloom } from './pages/Bloom'
 import { Brain } from './pages/Brain'
 import { Connection } from './pages/Connection'
+import { Extensions } from './pages/Extensions'
 import { Keywords } from './pages/Keywords'
 import { Operations } from './pages/Operations'
 import { Terminal } from './pages/Terminal'
@@ -79,6 +80,29 @@ export const SETTINGS: SettingsSection[] = [
             Content: Keywords,
           },
         ],
+      },
+    ],
+  },
+  {
+    id: 'device',
+    label: 'This device',
+    pages: [
+      {
+        id: 'extensions',
+        label: 'Extensions',
+        blurb:
+          'What Amber may do on this machine, and what each permission actually means.',
+        keywords: [
+          'permission',
+          'grant',
+          'power',
+          'shutdown',
+          'sleep',
+          'capability',
+          'device',
+          'consent',
+        ],
+        Content: Extensions,
       },
     ],
   },

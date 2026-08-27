@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 import { BloomView } from './bloom/BloomView'
 import { ChatView } from './chat/ChatView'
+import { DevicesView } from './devices/DevicesView'
 import { ConfirmDialog } from './chat/ConfirmDialog'
 import { PushTray } from './chat/PushTray'
 import { useAmberConnection } from './chat/useAmberConnection'
@@ -58,6 +59,10 @@ export function App(): React.JSX.Element {
           <div className={view === 'bloom' ? 'flex min-h-0 min-w-0 flex-1' : 'hidden'}>
             {bloomLinked && <BloomView />}
           </div>
+          {/* Unmounted like Keys and Settings, not kept alive like Chat: it holds no
+              connection and no scroll worth preserving, and it should re-read the live
+              device list on every visit rather than showing what was true last time. */}
+          {view === 'devices' && <DevicesView />}
           {view === 'keys' && <KeysView />}
           {view === 'settings' && <SettingsView />}
 

@@ -239,6 +239,17 @@ export interface ToolCallFrame {
   id: string
   name: string
   input: Record<string, unknown>
+  /**
+   * Present when this is a **device action** rather than a tool we declared via
+   * `register_tools`: `name` is then the dotted `{extensionId}.{action}` key this
+   * device announced, and `device_id` is us.
+   *
+   * Route on this key, never on the shape of `name`. The two name sets genuinely
+   * cannot overlap — Amber's sanitizer strips `.` and forces a `client_` prefix —
+   * but that rule lives in her repo and could change without us noticing. One
+   * explicit field cannot drift.
+   */
+  device_id?: string
 }
 
 /** How Amber sounds. Every field is the *effective* value, post-validation. */
@@ -561,6 +572,80 @@ export interface ReviewFrame {
   ack?: { action: string; id: number; ok: boolean; detail?: string }
 }
 
+/**
+ * One thing a device says it can do.
+ *
+ * `action` is the dotted `{extensionId}.{action}` key — the same string that comes
+ * back as `ToolCallFrame.name` when Amber asks for it.
+ *
+ * **`destructive` is the load-bearing field.** It is declared once, here, by the
+ * device that implements the action, and it drives two separate gates: Amber offers
+ * a destructive action only through her confirmation-gated `device_power` tool, and
+ * we prompt locally before running one. Neither side holds a list of dangerous
+ * action names, so a new destructive capability is gated the day it ships.
+ */
+export interface DeviceCapability {
+  action: string
+  description?: string
+  destructive?: boolean
+  input_schema?: Record<string, unknown>
+}
+
+/** A device Amber can currently reach. Never carries a session id — see `DeviceListFrame`. */
+export interface DeviceRecord {
+  device_id: string
+  name: string
+  platform: string
+  version?: string
+  capabilities: DeviceCapability[]
+  /** Epoch seconds, server clock. */
+  last_seen?: number
+}
+
+/**
+ * Who is reachable right now, and what each can do.
+ *
+ * Arrives in answer to our own `device_announce`, and unprompted when the set changes
+ * — Amber holds the broadcast until a connection is between turns, so a device that
+ * appears mid-sentence shows up a moment late rather than corrupting the audio stream.
+ * Advisory: ignoring it costs a panel, not a turn.
+ *
+ * Deliberately carries **no session id**. A session id is a resume credential, and
+ * this frame goes to every client, so one here would hand over another conversation.
+ */
+export interface DeviceListFrame {
+  type: 'device_list'
+  devices: DeviceRecord[]
+}
+
+/**
+ * The outcome of a `device_control_request` — the non-agentic path.
+ *
+ * No model call happened. This is the tap-a-button route, and it exists so a volume
+ * slider doesn't cost an LLM round trip; it lands on the same dispatch Amber's own
+ * `device_control` tool does, so clicking and asking can never drift apart.
+ */
+export interface DeviceControlResponseFrame {
+  type: 'device_control_response'
+  /** Echoes the `id` we sent on the request. */
+  id: string
+  ok: boolean
+  device_id?: string
+  action?: string
+  /** What the device said it did. Present on success. */
+  result?: string
+  /** Machine-readable failure. Present instead of `result` when `ok` is false. */
+  error?: DeviceError
+}
+
+export type DeviceError =
+  | 'disabled'
+  | 'unknown_device'
+  | 'device_offline'
+  | 'unsupported_action'
+  | 'timeout'
+  | 'action_failed'
+
 /** Something went wrong this turn. The connection stays open. */
 export interface ErrorFrame {
   type: 'error'
@@ -584,6 +669,8 @@ export type ServerFrame =
   | PushFrame
   | ConfirmRequestFrame
   | ReviewFrame
+  | DeviceListFrame
+  | DeviceControlResponseFrame
   | ErrorFrame
 
 // --- client -> server -------------------------------------------------------
@@ -744,6 +831,51 @@ export type ClientFrame =
       note?: string
       reply?: string
     }
+  /**
+   * Declare this machine as a device Amber can address by name.
+   *
+   * Distinct from `register_tools`, and the difference is the whole point.
+   * `register_tools` says "here are tools to offer the model on *this* conversation";
+   * this says "here is a machine, it persists, and another client may drive it". So
+   * these names are **not** sanitized or `client_`-prefixed and are **not** counted
+   * against the 16-tool cap — they arrive back as a `tool_call` carrying `device_id`.
+   *
+   * Idempotent: re-announcing replaces the record, which is why there is no separate
+   * refresh frame. Amber holds the registration on the connection, not the session, so
+   * re-send this on every `ready` exactly like `register_tools`.
+   */
+  | {
+      type: 'device_announce'
+      /** Stable across restarts. Ours lives in `device.json`, minted once. */
+      device_id: string
+      name: string
+      platform: string
+      version?: string
+      capabilities: DeviceCapability[]
+    }
+  /**
+   * Drive a device directly — no model call, no latency, no tokens.
+   *
+   * The non-agentic half of device control: what a tap on the Devices panel sends.
+   * It reaches the same dispatch Amber's own `device_control` tool does, the way
+   * `memory_action` reaches the same store functions her `forget_fact` tool does, so
+   * there is one implementation of "tell a device to do something" rather than two
+   * that can drift.
+   *
+   * Answered with `device_control_response` carrying this `id`. A destructive action
+   * is **not** routed through `confirm_request` here — a tap is already deliberate, and
+   * re-asking for something just clicked trains people to approve without reading. The
+   * confirmation lives on the conversational path, and locally on the target device.
+   */
+  | {
+      type: 'device_control_request'
+      /** Ours to mint; echoed back on the response. */
+      id: string
+      device_id: string
+      /** The dotted `{extensionId}.{action}` key, as announced. */
+      action: string
+      args?: Record<string, unknown>
+    }
 
 // --- narrowing helpers ------------------------------------------------------
 
@@ -765,6 +897,8 @@ const SERVER_FRAME_TYPES = new Set<ServerFrame['type']>([
   'push',
   'confirm_request',
   'review',
+  'device_list',
+  'device_control_response',
   'error',
 ])
 

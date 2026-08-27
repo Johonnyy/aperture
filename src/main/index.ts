@@ -12,6 +12,7 @@ import { verifyLink } from './bloom/link'
 import { hold as holdDeepLink, parseDeepLink } from './bloom/deep-link'
 import { closeAllRunStreams } from './bloom/run-stream'
 import { getSettings } from './config'
+import { getDeviceId, getDeviceName } from './device'
 import { registerIpc } from './ipc'
 import { closeAllShells } from './ssh/ssh-client'
 import { createWindow } from './window'
@@ -91,6 +92,11 @@ function buildConnection(): AmberConnection {
       // Re-declare on every ready. Amber keeps declared specs across a reconnect,
       // so without this a stale build's tools stay advertised to the model.
       bridge?.register()
+      // And announce this machine as an addressable device. Same rule again, and for a
+      // sharper reason: Amber holds a device on the *connection*, not the session, so a
+      // reconnect that didn't re-announce would leave this machine invisible to every
+      // other client until the app was restarted.
+      bridge?.announce(getDeviceId(), getDeviceName(), app.getVersion())
       // Same reasoning for the voice: it lives on Amber's session, so a resume past
       // the TTL would silently drop back to the server default. The chosen brain is
       // session state too, and re-asserted here for exactly the same reason.

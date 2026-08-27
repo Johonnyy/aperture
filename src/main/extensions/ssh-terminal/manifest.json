@@ -1,0 +1,15 @@
+{
+  "id": "ssh-terminal",
+  "name": "SSH Terminal",
+  "version": "1.0.0",
+  "description": "Run commands and open interactive shells on your servers over SSH.",
+  "permissions": ["pty", "secrets"],
+  "actions": [
+    {
+      "name": "run_command",
+      "description": "Run a shell command on one of Johnny's servers over SSH and return its output.",
+      "expose": "tool",
+      "timeoutMs": 8000
+    }
+  ]
+}

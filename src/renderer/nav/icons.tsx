@@ -109,3 +109,20 @@ export function BloomIcon({ className }: IconProps): React.JSX.Element {
     </svg>
   )
 }
+
+/**
+ * Devices: a screen and a handset side by side — the fleet, not one machine.
+ *
+ * Spreads `base` like every other icon here, and that is not just tidiness: `base`
+ * carries `width`/`height`, and an svg without them has no intrinsic size, so it
+ * stretches to fill its flex row and shoulders the nav label out of the way.
+ */
+export function DevicesIcon({ className }: IconProps): React.JSX.Element {
+  return (
+    <svg {...base} className={className}>
+      <rect x="3" y="4" width="9.5" height="7" rx="1.25" />
+      <path d="M7.75 11v3.5M5.75 14.5h4" />
+      <rect x="14.5" y="8" width="3.5" height="8" rx="1.25" />
+    </svg>
+  )
+}

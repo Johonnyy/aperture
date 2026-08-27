@@ -41,6 +41,8 @@ const SERVER_FRAMES = [
   'push',
   'confirm_request',
   'review',
+  'device_list',
+  'device_control_response',
   'error',
 ]
 
@@ -71,6 +73,8 @@ const CLIENT_FRAMES = [
   'review_query',
   'review_action',
   'eval_capture',
+  'device_announce',
+  'device_control_request',
 ]
 if (new Set(CLIENT_FRAMES).size !== CLIENT_FRAMES.length) {
   fail('duplicate client frame type in the list')

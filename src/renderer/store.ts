@@ -8,6 +8,8 @@ import type {
   MemoryFact,
   ModelFrame,
   PushFrame,
+  DeviceRecord,
+  DeviceControlResponseFrame,
   Reflection,
   ReviewFrame,
   ServerFrame,
@@ -16,6 +18,7 @@ import type {
   TurnCompleteFrame,
   VoiceFrame,
 } from '../shared/protocol'
+import type { ExtensionSummary } from '../shared/extensions'
 import type {
   ApertureEvent,
   AuditEntry,
@@ -318,6 +321,26 @@ interface State {
    */
   confirmRequest: ConfirmRequestFrame | null
   /**
+   * Every machine Amber can currently reach, this one included.
+   *
+   * Whole-list, never a delta — Amber sends the full set on every change, so a dropped
+   * frame cannot leave a device on screen long after it went away. That matters more
+   * here than for most panels: a stale row offers a button that can only fail.
+   */
+  devices: DeviceRecord[]
+  /** What is installed on *this* machine and what it may do. Populated on demand by the
+   *  Settings page, and replaced wholesale whenever a grant changes. */
+  extensions: ExtensionSummary[]
+  /**
+   * The most recent answer for each device action we asked for from the panel, keyed by
+   * the request id we minted.
+   *
+   * Kept rather than shown-and-forgotten because a device action is fire-and-forget from
+   * the UI's point of view — the button returns immediately and the answer arrives up to
+   * twenty seconds later, so there has to be somewhere for it to land.
+   */
+  deviceResults: Record<string, DeviceControlResponseFrame>
+  /**
    * How Amber is doing, per topic. Kept apart rather than in one list because the
    * three answer different questions and a panel showing one must not be cleared by
    * a query for another.
@@ -433,6 +456,9 @@ export const useStore = create<State>((set) => ({
   audit: [],
   pendingApprovals: [],
   pushes: [],
+  devices: [],
+  extensions: [],
+  deviceResults: {},
   confirmRequest: null,
   review: { tools: [], reflections: [], evals: [], since: null, ack: null },
   memoryLineage: [],
@@ -549,6 +575,11 @@ export const useStore = create<State>((set) => ({
         case 'activity-run':
           // The card grows a live build timeline. Nothing else about it changes.
           return { timeline: patch(s.timeline, event.callId, { runId: event.runId }) }
+
+        case 'extensions':
+          // Whole picture, never a delta — a consent screen showing a permission as
+          // granted after it was revoked is the one failure mode worth designing out.
+          return { extensions: event.summaries }
 
         case 'connection': {
           const was = s.connection.state
@@ -950,6 +981,26 @@ function reduceFrame(s: State, frame: ServerFrame): Partial<State> {
           ...(frame.since ? { since: frame.since } : {}),
           ack: frame.ack ?? null,
         },
+      }
+
+    case 'device_list':
+      // Whole-list, like `status`. A device that has gone must vanish from the panel,
+      // and merging would keep offering its controls.
+      return {
+        devices: frame.devices,
+        trace: push(trace('info', `device_list (${frame.devices.length})`)),
+      }
+
+    case 'device_control_response':
+      return {
+        deviceResults: { ...s.deviceResults, [frame.id]: frame },
+        trace: push(
+          trace(
+            frame.ok ? 'info' : 'warn',
+            `device ${frame.action ?? '?'}`,
+            frame.ok ? frame.result : frame.error,
+          ),
+        ),
       }
 
     case 'confirm_request':

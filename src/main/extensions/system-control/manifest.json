@@ -1,0 +1,173 @@
+{
+  "id": "system-control",
+  "name": "System Control",
+  "version": "1.0.0",
+  "description": "Power, audio and application control for this machine.",
+  "permissions": [
+    "power",
+    "audio",
+    "process"
+  ],
+  "actions": [
+    {
+      "name": "power.sleep",
+      "description": "Put this machine to sleep. On Windows this hibernates rather than sleeps whenever hibernation is enabled \u2014 say so if asked, rather than claiming it slept.",
+      "destructive": true,
+      "timeoutMs": 5000,
+      "platforms": [
+        "win32",
+        "darwin",
+        "linux"
+      ],
+      "control": {
+        "kind": "button",
+        "label": "Sleep",
+        "tone": "danger"
+      }
+    },
+    {
+      "name": "power.shutdown",
+      "description": "Shut this machine down. Applications with unsaved work are not forced closed, so a shutdown can be cancelled by a dialog on the machine itself.",
+      "destructive": true,
+      "timeoutMs": 5000,
+      "platforms": [
+        "win32",
+        "darwin",
+        "linux"
+      ],
+      "control": {
+        "kind": "button",
+        "label": "Shut down",
+        "tone": "danger"
+      }
+    },
+    {
+      "name": "audio.get_volume",
+      "description": "Read this machine's current output volume, as a percentage.",
+      "timeoutMs": 6000,
+      "platforms": [
+        "win32",
+        "darwin",
+        "linux"
+      ]
+    },
+    {
+      "name": "audio.set_volume",
+      "description": "Set this machine's output volume. Takes a percentage from 0 to 100.",
+      "timeoutMs": 6000,
+      "platforms": [
+        "win32",
+        "darwin",
+        "linux"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "level": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Volume percentage."
+          }
+        },
+        "required": [
+          "level"
+        ]
+      },
+      "control": {
+        "kind": "slider",
+        "label": "Volume",
+        "arg": "level",
+        "min": 0,
+        "max": 100
+      }
+    },
+    {
+      "name": "audio.mute",
+      "description": "Mute or unmute this machine's output.",
+      "timeoutMs": 6000,
+      "platforms": [
+        "win32",
+        "darwin",
+        "linux"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "muted": {
+            "type": "boolean",
+            "description": "True to mute."
+          }
+        },
+        "required": [
+          "muted"
+        ]
+      },
+      "control": {
+        "kind": "toggle",
+        "label": "Mute",
+        "arg": "muted"
+      }
+    },
+    {
+      "name": "process.list",
+      "description": "List the applications currently running on this machine.",
+      "timeoutMs": 6000,
+      "platforms": [
+        "win32",
+        "darwin",
+        "linux"
+      ]
+    },
+    {
+      "name": "process.close",
+      "description": "Ask an application to close, by its executable name. Nothing is force-closed, so an app with unsaved work can refuse.",
+      "destructive": true,
+      "timeoutMs": 5000,
+      "platforms": [
+        "win32",
+        "darwin",
+        "linux"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Executable name, e.g. notepad.exe or Spotify."
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "control": {
+        "kind": "button",
+        "label": "Close",
+        "tone": "danger"
+      }
+    },
+    {
+      "name": "process.launch",
+      "description": "Open a file or application by its full path on this machine. Takes a path, not an application name.",
+      "timeoutMs": 5000,
+      "platforms": [
+        "win32",
+        "darwin",
+        "linux"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute path to the file or application."
+          }
+        },
+        "required": [
+          "path"
+        ]
+      }
+    }
+  ]
+}

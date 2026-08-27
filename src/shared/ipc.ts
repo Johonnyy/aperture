@@ -87,6 +87,20 @@ export const IPC = {
   AUDIT_LIST: 'audit:list',
   AUDIT_CLEAR: 'audit:clear',
 
+  /** This machine's own identity in the fleet — minted once, editable by name. */
+  DEVICE_IDENTITY: 'device:identity',
+  DEVICE_RENAME: 'device:rename',
+  /**
+   * Drive a device from the panel. Fire-and-forget on purpose: the answer arrives as a
+   * `device_control_response` frame up to twenty seconds later, so returning a promise
+   * here would mean a button that appears to hang.
+   */
+  DEVICE_CONTROL: 'device:control',
+
+  /** What is installed, what it may do, and which permissions have been granted. */
+  EXTENSIONS_LIST: 'extensions:list',
+  EXTENSIONS_SET_GRANT: 'extensions:set-grant',
+
   /** The link record, answered from disk — synchronous enough to gate the sidebar. */
   BLOOM_LINK: 'bloom:link',
   /** Read Bloom off a box over SSH. Needs the sudo password the Servers tab holds. */

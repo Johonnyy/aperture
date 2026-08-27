@@ -16,6 +16,7 @@ import type {
   RunTrace,
   UsageReport,
 } from '../shared/bloom'
+import type { ExtensionSummary } from '../shared/extensions'
 import { IPC } from '../shared/ipc'
 import type { CatalogueModel } from '../shared/models'
 import type {
@@ -483,6 +484,28 @@ const api = {
   audit: {
     list: (): Promise<AuditEntry[]> => ipcRenderer.invoke(IPC.AUDIT_LIST),
     clear: (): Promise<AuditEntry[]> => ipcRenderer.invoke(IPC.AUDIT_CLEAR),
+  },
+
+  devices: {
+    identity: (): Promise<{ deviceId: string; deviceName: string }> =>
+      ipcRenderer.invoke(IPC.DEVICE_IDENTITY),
+    rename: (name: string): Promise<string> => ipcRenderer.invoke(IPC.DEVICE_RENAME, name),
+    /**
+     * Ask a device to do something. Returns the request id, not the outcome — the
+     * answer arrives as a `device_control_response` frame and lands in the store, so a
+     * promise here would resolve before anything had happened.
+     */
+    control: (deviceId: string, action: string, args?: Record<string, unknown>): string => {
+      const id = crypto.randomUUID()
+      ipcRenderer.send(IPC.DEVICE_CONTROL, { id, deviceId, action, args })
+      return id
+    },
+  },
+
+  extensions: {
+    list: (): Promise<ExtensionSummary[]> => ipcRenderer.invoke(IPC.EXTENSIONS_LIST),
+    setGrant: (key: string, granted: boolean): Promise<ExtensionSummary[]> =>
+      ipcRenderer.invoke(IPC.EXTENSIONS_SET_GRANT, key, granted),
   },
 }
 

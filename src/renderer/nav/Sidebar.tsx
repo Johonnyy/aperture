@@ -1,9 +1,16 @@
 import { useEffect, useState } from 'react'
 
 import { useStore } from '../store'
-import { AmberIcon, BloomIcon, KeyIcon, ServerIcon, SlidersIcon } from './icons'
+import {
+  AmberIcon,
+  BloomIcon,
+  DevicesIcon,
+  KeyIcon,
+  ServerIcon,
+  SlidersIcon,
+} from './icons'
 
-export type View = 'chat' | 'ssh' | 'keys' | 'settings' | 'bloom'
+export type View = 'chat' | 'ssh' | 'keys' | 'settings' | 'bloom' | 'devices'
 
 interface NavItem {
   id: View
@@ -33,6 +40,10 @@ const SERVERS: NavItem = { id: 'ssh', label: 'Servers', icon: ServerIcon }
 // credentials an install spends, so they belong next to the thing that spends
 // them, not filed under preferences.
 const KEYS: NavItem = { id: 'keys', label: 'Keys', icon: KeyIcon }
+// Grouped with Servers rather than with Amber: both are "machines I operate", and
+// the distinction that matters is remote-over-SSH versus here-and-now-over-the-socket,
+// not which of them Amber happens to be able to drive — she can drive both.
+const DEVICES: NavItem = { id: 'devices', label: 'Devices', icon: DevicesIcon }
 const SETTINGS: NavItem = { id: 'settings', label: 'Settings', icon: SlidersIcon }
 
 const STORAGE_KEY = 'aperture.sidebar.collapsed'
@@ -113,6 +124,13 @@ export function Sidebar({
           active={view === SERVERS.id}
           collapsed={collapsed}
           onClick={() => onNavigate(SERVERS.id)}
+        />
+
+        <NavButton
+          item={DEVICES}
+          active={view === DEVICES.id}
+          collapsed={collapsed}
+          onClick={() => onNavigate(DEVICES.id)}
         />
 
         <NavButton

@@ -35,9 +35,15 @@ export function ApprovalCard({
           {Math.ceil(remaining / 1000)}s
         </span>
       </div>
-      <p className="mt-1 text-meta text-muted">on {approval.server}</p>
+      {/* SSH still shows "on <server>" with the bare command, because that is the
+          shape someone reads fastest. Everything else falls back to the action key and
+          the rendered arguments — a card that said "on undefined" would be worse than
+          one that names the capability. */}
+      <p className="mt-1 text-meta text-muted">
+        {approval.server ? `on ${approval.server}` : approval.action}
+      </p>
       <pre className="mt-1.5 overflow-x-auto rounded-control bg-ground px-2 py-1.5 font-mono text-meta whitespace-pre-wrap text-ink">
-        {approval.command}
+        {approval.command ?? approval.detail}
       </pre>
       <div className="mt-2 flex gap-2">
         <button

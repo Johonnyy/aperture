@@ -1,7 +1,7 @@
 {
   "name": "aperture",
   "version": "0.1.0",
-  "description": "Amber's desktop client \u2014 chat, live trace, and an SSH bridge Amber can drive.",
+  "description": "Amber's desktop client — chat, live trace, and an SSH bridge Amber can drive.",
   "main": "./out/main/index.js",
   "author": "Johnny Patino",
   "license": "MIT",
@@ -14,7 +14,7 @@
     "dist": "npm run build && electron-builder --publish never",
     "dist:dir": "npm run build && electron-builder --dir --publish never",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "verify": "npm run verify:connection && npm run verify:voice && npm run verify:model && npm run verify:install && npm run verify:typeahead && npm run verify:activity && npm run verify:theme && npm run verify:settings && npm run verify:bloom-keys && npm run verify:bloom-wire && npm run verify:bloom-client && npm run verify:bloom-stream && npm run verify:infra-redact && npm run verify:credentials && npm run verify:configuration && npm run verify:releases && npm run verify:registry && npm run verify:peers && npm run verify:push && npm run verify:waterfall && npm run verify:lifecycle && npm run verify:reply",
+    "verify": "npm run verify:connection && npm run verify:voice && npm run verify:model && npm run verify:install && npm run verify:typeahead && npm run verify:activity && npm run verify:theme && npm run verify:settings && npm run verify:bloom-keys && npm run verify:bloom-wire && npm run verify:bloom-client && npm run verify:bloom-stream && npm run verify:infra-redact && npm run verify:credentials && npm run verify:configuration && npm run verify:releases && npm run verify:registry && npm run verify:peers && npm run verify:push && npm run verify:waterfall && npm run verify:lifecycle && npm run verify:extensions && npm run verify:devices && npm run verify:reply",
     "verify:settings": "esbuild src/renderer/settings/tree.ts --bundle --platform=node --format=esm --outfile=out/verify/settings-tree.mjs && node scripts/verify-settings.mjs",
     "verify:registry": "esbuild src/shared/registry.ts --bundle --platform=node --format=esm --outfile=out/verify/registry.mjs && esbuild src/renderer/infra/registry-layout.ts --bundle --platform=node --format=esm --outfile=out/verify/registry-layout.mjs && esbuild src/main/infra/actions.ts --bundle --platform=node --format=esm --outfile=out/verify/actions.mjs && node scripts/verify-registry.mjs",
     "verify:theme": "esbuild src/shared/theme.ts --bundle --platform=node --format=esm --outfile=out/verify/theme.mjs && node scripts/verify-theme.mjs",
@@ -36,7 +36,9 @@
     "verify:activity": "esbuild src/renderer/bloom/build/phases.ts --bundle --platform=node --format=esm --outfile=out/verify/phases.mjs && node scripts/verify-activity.mjs",
     "verify:waterfall": "esbuild src/renderer/chat/turn-layout.ts --bundle --platform=node --format=esm --outfile=out/verify/turn-layout.mjs && node scripts/verify-waterfall.mjs",
     "verify:lifecycle": "esbuild src/renderer/status/fact-lifecycle.ts --bundle --platform=node --format=esm --outfile=out/verify/fact-lifecycle.mjs && node scripts/verify-lifecycle.mjs",
-    "verify:reply": "esbuild src/renderer/store.ts --bundle --platform=node --format=esm --define:window=globalThis --outfile=out/verify/store.mjs && node scripts/verify-reply.mjs"
+    "verify:reply": "esbuild src/renderer/store.ts --bundle --platform=node --format=esm --define:window=globalThis --outfile=out/verify/store.mjs && node scripts/verify-reply.mjs",
+    "verify:extensions": "esbuild src/shared/extensions.ts --bundle --platform=node --format=esm --outfile=out/verify/extensions.mjs && esbuild src/main/extensions/index.ts --bundle --platform=node --format=esm --outfile=out/verify/extension-index.mjs && esbuild src/main/extensions/system-control/commands.ts --bundle --platform=node --format=esm --outfile=out/verify/system-commands.mjs && node scripts/verify-extensions.mjs",
+    "verify:devices": "esbuild src/main/extensions/system-control/commands.ts --bundle --platform=node --format=esm --outfile=out/verify/system-commands.mjs && esbuild src/main/extensions/system-control/audio.ts --bundle --platform=node --format=esm --outfile=out/verify/system-audio.mjs && esbuild src/main/extensions/system-control/apps.ts --bundle --platform=node --format=esm --outfile=out/verify/system-apps.mjs && esbuild src/renderer/devices/controls.ts --bundle --platform=node --format=esm --outfile=out/verify/device-controls.mjs && node scripts/verify-devices.mjs"
   },
   "dependencies": {
     "ssh2": "^1.16.0",

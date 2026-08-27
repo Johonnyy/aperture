@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain, nativeTheme } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeTheme } from 'electron'
 import { randomUUID } from 'node:crypto'
 
 import type { AgentConfigInput, BloomLink, ConnectionSecretInput } from '../shared/bloom'
@@ -33,6 +33,9 @@ import {
   updateServer,
   updateSettings,
 } from './config'
+import { getDeviceId, getDeviceName, setDeviceName } from './device'
+import { setGrant } from './extensions/grants'
+import { extensionRegistry } from './extensions/registry'
 import * as infra from './infra'
 import {
   deleteCredential,
@@ -436,6 +439,51 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
   ipcMain.handle(IPC.BRIDGE_APPROVE, (_e, id: string) => bridge.resolveApproval(id, true))
   ipcMain.handle(IPC.BRIDGE_DENY, (_e, id: string) => bridge.resolveApproval(id, false))
   ipcMain.handle(IPC.BRIDGE_PENDING, () => bridge.listPending())
+
+  // --- devices & extensions -------------------------------------------------
+
+  ipcMain.handle(IPC.DEVICE_IDENTITY, () => ({
+    deviceId: getDeviceId(),
+    deviceName: getDeviceName(),
+  }))
+
+  ipcMain.handle(IPC.DEVICE_RENAME, (_e, name: string) => {
+    const deviceName = setDeviceName(name)
+    // Re-announce: the name is part of what other clients resolve "my desktop" against,
+    // so a rename that only landed on disk would leave every panel showing the old one.
+    bridge.announce(getDeviceId(), deviceName, app.getVersion())
+    return deviceName
+  })
+
+  // Fire-and-forget (`on`, not `handle`). The answer comes back as a
+  // `device_control_response` frame, so awaiting here would be a promise that resolves
+  // long before the thing it describes.
+  ipcMain.on(
+    IPC.DEVICE_CONTROL,
+    (_e, request: { id: string; deviceId: string; action: string; args?: Record<string, unknown> }) => {
+      amber.send({
+        type: 'device_control_request',
+        id: request.id,
+        device_id: request.deviceId,
+        action: request.action,
+        args: request.args,
+      })
+    },
+  )
+
+  ipcMain.handle(IPC.EXTENSIONS_LIST, () => extensionRegistry.describe())
+
+  ipcMain.handle(IPC.EXTENSIONS_SET_GRANT, (_e, key: string, granted: boolean) => {
+    setGrant(key, granted)
+    const summaries = extensionRegistry.describe()
+    emit({ kind: 'extensions', summaries })
+    // A grant changes what this machine can do, so both declarations are stale. Amber
+    // refuses anything a device didn't announce, which is what makes revoking here
+    // enforce on her side too rather than only hiding a button.
+    bridge.register()
+    bridge.announce(getDeviceId(), getDeviceName(), app.getVersion())
+    return summaries
+  })
 
   // --- bloom ----------------------------------------------------------------
 
