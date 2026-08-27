@@ -120,10 +120,19 @@ check(
   'unknown',
 )
 check('an unresolved latest is unknown', compareVersions(`sha-${SHA}`, null), 'unknown')
-// No ordering exists between these two strings, and inventing one would offer a
-// "downgrade to a commit" button on a box running a pre-switch image.
-check('a semver pin against a commit head is unknown', compareVersions('0.1.0', SHA), 'unknown')
+// THE MIGRATION CASE, and the one this got wrong first. No ordering exists between
+// `0.2.10` and a SHA, so it is not `behind` — but it is not `unknown` either: the repo
+// has demonstrably moved to commits and this pin cannot follow it. Returning `unknown`
+// offered no button, and since every box in the fleet carried a semver pin on the day
+// of the switch, that made the entire fleet un-updatable from the UI at once.
+check('a semver pin against a commit head is the legacy migration', compareVersions('0.2.10', SHA), 'legacy')
+check('and it is offered, not hidden', ['behind', 'legacy'].includes(compareVersions('0.2.10', SHA)), true)
+// The reverse means the repo went backwards, which no workflow here can produce.
 check('a commit pin against a semver head is unknown', compareVersions(`sha-${SHA}`, '0.1.0'), 'unknown')
+// Still unknown when the pin is not a version at all — `legacy` is a claim about a
+// readable semver pin, not a shrug at anything unparseable.
+check('junk against a commit head stays unknown', compareVersions('not-a-version', SHA), 'unknown')
+check('a null pin against a commit head stays unknown', compareVersions(null, SHA), 'unknown')
 
 console.log('\ncompareVersions — semver, for pins predating the switch\n')
 check('behind', compareVersions('0.1.0', '0.2.0'), 'behind')

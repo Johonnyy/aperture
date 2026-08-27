@@ -318,7 +318,9 @@ function Version({
   // a restart. Different fix, so a different sentence.
   const unrestarted = Boolean(running && pinned && running !== pinned)
 
-  const offer = comparison === 'behind' ? latest : null
+  // `legacy` offers too — a semver pin against a commit head is the migration every
+  // box deployed before the switch needs, not an unanswerable question.
+  const offer = comparison === 'behind' || comparison === 'legacy' ? latest : null
 
   return (
     <div className="flex flex-col gap-1.5 border-t border-line pt-2">

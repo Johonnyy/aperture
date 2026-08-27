@@ -143,7 +143,11 @@ export function AppCard({
   const versus = compareVersions(pinnedTag, release?.latest ?? null, release?.compare)
   // "3 commits behind", or null when nothing honest can be said about the distance.
   const distance = describeDistance(release)
-  const canUpdate = !notDeployed && !autoUpdates && versus === 'behind'
+  // `legacy` updates too. It is not "we cannot tell" — it is "this box predates
+  // commit versioning and cannot follow the branch", which is precisely a thing to
+  // offer a button for. Leaving it out is what made every pre-switch box, i.e. all
+  // of them, un-updatable from this screen.
+  const canUpdate = !notDeployed && !autoUpdates && (versus === 'behind' || versus === 'legacy')
 
   const prefixDrift =
     app.envPrefix &&
@@ -194,6 +198,11 @@ export function AppCard({
                 <span className="text-accent" title={release?.message ?? undefined}>
                   {pinnedLabel} → {displayVersion(release?.latest)}
                   {distance ? ` · ${distance}` : ''} available
+                </span>
+              ) : versus === 'legacy' ? (
+                <span className="text-accent" title={release?.message ?? undefined}>
+                  {pinnedLabel} → {displayVersion(release?.latest)} · pre-commit pin,
+                  update to follow the branch
                 </span>
               ) : versus === 'up-to-date' ? (
                 <span className="text-muted">{pinnedLabel} · up to date</span>

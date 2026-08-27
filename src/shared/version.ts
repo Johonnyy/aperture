@@ -59,6 +59,17 @@ export type Comparison =
   | 'behind'
   /** Pinned to something newer than the newest release — a prerelease, or a typo. */
   | 'ahead'
+  /**
+   * A semver pin against a commit head: this box predates commit-based versioning.
+   *
+   * Its own state rather than `behind`, because no ordering between `0.2.10` and a
+   * SHA exists to justify the word, and rather than `unknown`, because something
+   * definite IS known — the repo has moved to commits and this pin cannot follow it.
+   * `unknown` was the first answer here and it was wrong in the only way that
+   * matters: it offered no button, and since every box in the fleet carried a semver
+   * pin at the switch, the entire fleet became un-updatable from the UI at once.
+   */
+  | 'legacy'
   /** Either side unparseable, or the check failed. Never rendered as reassurance. */
   | 'unknown'
 
@@ -180,7 +191,15 @@ export function compareVersions(
 ): Comparison {
   const pinnedCommit = commitOf(pinned)
   const latestCommit = commitOf(latest)
-  if (pinnedCommit || latestCommit) return compareCommits(pinned, latest, compare)
+  if (pinnedCommit && latestCommit) return compareCommits(pinned, latest, compare)
+
+  // A semver pin, and the repo now publishes commits: the migration case. Every box
+  // deployed before the switch looks like this, so it has to lead somewhere.
+  if (!pinnedCommit && latestCommit && parse(pinned)) return 'legacy'
+  // The reverse — a commit pin against a semver head — means the repo went backwards,
+  // which no workflow here can produce. Refuse to narrate it.
+  if (pinnedCommit && !latestCommit) return 'unknown'
+  if (latestCommit) return 'unknown'
 
   const a = parse(pinned)
   const b = parse(latest)
