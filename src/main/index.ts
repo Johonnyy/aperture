@@ -28,11 +28,34 @@ let bridge: ToolBridge | null = null
  * no state and no window, while the running one never hears about it. Acquiring the
  * lock is what routes the URL to the instance that can act on it.
  *
- * The losing instance quits immediately. `window-all-closed` will fire with `bridge`
- * and `amber` still null, which the optional calls there already tolerate.
+ * The losing instance leaves immediately, and `gotTheLock` is checked again inside
+ * `whenReady` — exit is a request, not a barrier, and `ready` can still fire behind
+ * it. A loser that got as far as building a connection would announce this machine
+ * to the fleet a second time on its way out.
  */
-if (!app.requestSingleInstanceLock()) {
-  app.quit()
+const gotTheLock = app.requestSingleInstanceLock()
+if (!gotTheLock) {
+  // `app.exit`, not `app.quit`: `quit` before `ready` starts a shutdown that `ready`
+  // can still outrun, so the loser would go on to build a connection and a window in
+  // a process that is already dying. Nothing here has opened a file or a socket yet,
+  // so there is nothing to unwind.
+  app.exit(0)
+}
+
+/**
+ * Bring the existing window back to the front.
+ *
+ * Split out of `handleDeepLink` because it was trapped inside it: the deep-link path
+ * returns early when the URL parses to nothing, so an ordinary relaunch — no
+ * `aperture://` in argv — reached `second-instance` and did *nothing at all*. That is
+ * fine when the window is merely behind something and fatal when it is hidden, since
+ * relaunching is the only move a person has and the lock routes it straight here.
+ */
+function focusMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
 }
 
 /**
@@ -47,12 +70,7 @@ function handleDeepLink(raw: string | undefined): void {
 
   holdDeepLink(payload)
   emit({ kind: 'bloom-oauth', provider: payload.provider })
-
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    if (mainWindow.isMinimized()) mainWindow.restore()
-    mainWindow.show()
-    mainWindow.focus()
-  }
+  focusMainWindow()
 }
 
 // macOS delivers the URL through this event and never through argv, and a cold
@@ -65,6 +83,10 @@ app.on('open-url', (event, url) => {
 
 // Windows and Linux deliver it as an argv entry to the instance holding the lock.
 app.on('second-instance', (_event, argv) => {
+  // Focus first and unconditionally. A second launch means "I want Aperture in front
+  // of me" whether or not it carries a URL, and it is the documented recovery for a
+  // window the OS has lost track of.
+  focusMainWindow()
   handleDeepLink(argv.find((arg) => arg.startsWith('aperture://')))
 })
 
@@ -138,6 +160,10 @@ function buildConnection(): AmberConnection {
 }
 
 app.whenReady().then(() => {
+  // The loser of the lock is on its way out; building a connection and a window here
+  // would announce this machine to the fleet twice and race the shutdown.
+  if (!gotTheLock) return
+
   app.setAppUserModelId('dev.johnny.aperture')
 
   // Register the scheme so Bloom's completion page can hand control back.

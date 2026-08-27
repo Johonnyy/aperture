@@ -8,6 +8,26 @@ import { getBloomRecord, getSettings } from './config'
 export const TITLE_BAR_HEIGHT = 36
 
 /**
+ * How long to wait for `ready-to-show` before showing the window regardless.
+ *
+ * `ready-to-show` fires on the renderer's **first paint**, and a window created with
+ * `show: false` is a hidden widget Chromium is entitled not to composite. When that
+ * happens the event never arrives — and since it was the only caller of `show()`,
+ * Aperture becomes a live process with no window: the renderer runs, connects to
+ * Amber and announces this machine to the fleet, so the device appears on another
+ * computer while nothing is on screen here.
+ *
+ * There is no way back from that state. Aperture has no tray, `activate` only builds
+ * a window when there are *zero* windows (a hidden one counts), and the
+ * single-instance lock means relaunching hands control to the stuck instance.
+ *
+ * A deadline turns "never" into "a beat late". The white flash `show: false` exists
+ * to avoid is still avoided on the normal path, and on this one `backgroundColor`
+ * has already painted the frame the right colour anyway.
+ */
+const SHOW_DEADLINE_MS = 4_000
+
+/**
  * The tint for the native window buttons.
  *
  * Windows and Linux only — on macOS `titleBarStyle: 'hidden'` already yields the
@@ -71,8 +91,18 @@ export function createWindow(): BrowserWindow {
     },
   })
 
-  // Avoid the white flash: wait until the first paint.
-  window.once('ready-to-show', () => window.show())
+  // Avoid the white flash: wait until the first paint — but never *only* on that.
+  // See SHOW_DEADLINE_MS for why a missed `ready-to-show` is unrecoverable.
+  let shown = false
+  const show = (why: string): void => {
+    if (shown || window.isDestroyed()) return
+    shown = true
+    if (why !== 'ready-to-show') console.warn(`[window] shown via ${why}, not first paint`)
+    window.show()
+  }
+  const deadline = setTimeout(() => show('deadline'), SHOW_DEADLINE_MS)
+  window.once('ready-to-show', () => show('ready-to-show'))
+  window.once('closed', () => clearTimeout(deadline))
 
   // Never navigate the shell itself to an external page; open it in the browser.
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -92,6 +122,18 @@ export function createWindow(): BrowserWindow {
 
   // Surface renderer crashes and blocked resources in the main-process log rather
   // than letting them disappear into a console nobody has open.
+  //
+  // A failed document load used to be entirely silent — `loadFile` is called with
+  // `void`, so a rejection is an unhandled warning nobody reads — and the window then
+  // waited forever for a paint that could not happen. Main frame only, and `-3`
+  // (ABORTED) is skipped because a superseded navigation reports it routinely.
+  window.webContents.on('did-fail-load', (_e, code, description, url, isMainFrame) => {
+    if (!isMainFrame || code === -3) return
+    console.error(`[window] load failed ${code} ${description} (${url})`)
+    // Show it anyway: a visibly broken window is a bug report, a ghost process is a
+    // mystery, and this is the case where no `ready-to-show` will ever arrive.
+    show('did-fail-load')
+  })
   window.webContents.on('render-process-gone', (_e, details) => {
     console.error('[renderer gone]', details.reason, details.exitCode)
   })
