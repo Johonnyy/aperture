@@ -96,6 +96,14 @@ export const IPC = {
    * here would mean a button that appears to hang.
    */
   DEVICE_CONTROL: 'device:control',
+  /**
+   * The IPv4 addresses a phone could reach this machine on.
+   *
+   * Pairing needs it because the default URL is `ws://localhost:8000/ws`, and on a
+   * phone `localhost` is the phone — so the one address this app knows by default is
+   * the one address that cannot work.
+   */
+  DEVICE_LAN_ADDRESSES: 'device:lan-addresses',
   /** What this machine calls the other machines. Local, never announced. */
   DEVICE_NICKNAMES: 'device:nicknames',
   DEVICE_SET_NICKNAME: 'device:set-nickname',

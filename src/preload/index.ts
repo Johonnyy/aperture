@@ -28,6 +28,7 @@ import type {
   ExecResult,
   InfraStatus,
   KeyRecord,
+  LanAddress,
   PendingApproval,
   ServerConfig,
   Settings,
@@ -501,6 +502,11 @@ const api = {
       ipcRenderer.send(IPC.DEVICE_CONTROL, { id, deviceId, action, args })
       return id
     },
+    /**
+     * Addresses a phone could reach this machine on, best first. Used only by the
+     * pairing page, which must not hand out `localhost`.
+     */
+    lanAddresses: (): Promise<LanAddress[]> => ipcRenderer.invoke(IPC.DEVICE_LAN_ADDRESSES),
     /**
      * What this machine calls the other machines. Local and display-only: Amber never
      * sees a nickname, so renaming *this* machine goes through `rename` above instead,

@@ -25,6 +25,21 @@ export interface ConnectionStatus {
   attempt?: number
 }
 
+/**
+ * An address a phone could reach this machine on, for QR pairing.
+ *
+ * In `shared/` because three layers need it: main enumerates them, the preload types
+ * the bridge, and the pairing page renders them.
+ */
+export interface LanAddress {
+  /** Dotted quad, e.g. `192.168.1.20`. */
+  address: string
+  /** The adapter it belongs to, so a machine with several can be told apart. */
+  iface: string
+  /** True for the RFC1918 ranges — what a home network actually hands out. */
+  private: boolean
+}
+
 // --- the main -> renderer event stream --------------------------------------
 
 /**

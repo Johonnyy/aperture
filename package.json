@@ -14,7 +14,7 @@
     "dist": "npm run build && electron-builder --publish never",
     "dist:dir": "npm run build && electron-builder --dir --publish never",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "verify": "npm run verify:connection && npm run verify:voice && npm run verify:model && npm run verify:install && npm run verify:typeahead && npm run verify:activity && npm run verify:theme && npm run verify:settings && npm run verify:bloom-keys && npm run verify:bloom-wire && npm run verify:bloom-client && npm run verify:bloom-stream && npm run verify:infra-redact && npm run verify:credentials && npm run verify:configuration && npm run verify:releases && npm run verify:registry && npm run verify:peers && npm run verify:push && npm run verify:waterfall && npm run verify:lifecycle && npm run verify:extensions && npm run verify:devices && npm run verify:touchdesigner && npm run verify:reply",
+    "verify": "npm run verify:connection && npm run verify:voice && npm run verify:model && npm run verify:install && npm run verify:typeahead && npm run verify:activity && npm run verify:theme && npm run verify:settings && npm run verify:bloom-keys && npm run verify:bloom-wire && npm run verify:bloom-client && npm run verify:bloom-stream && npm run verify:infra-redact && npm run verify:credentials && npm run verify:configuration && npm run verify:releases && npm run verify:registry && npm run verify:peers && npm run verify:push && npm run verify:pairing && npm run verify:waterfall && npm run verify:lifecycle && npm run verify:extensions && npm run verify:devices && npm run verify:touchdesigner && npm run verify:reply",
     "verify:settings": "esbuild src/renderer/settings/tree.ts --bundle --platform=node --format=esm --outfile=out/verify/settings-tree.mjs && node scripts/verify-settings.mjs",
     "verify:registry": "esbuild src/shared/registry.ts --bundle --platform=node --format=esm --outfile=out/verify/registry.mjs && esbuild src/renderer/infra/registry-layout.ts --bundle --platform=node --format=esm --outfile=out/verify/registry-layout.mjs && esbuild src/main/infra/actions.ts --bundle --platform=node --format=esm --outfile=out/verify/actions.mjs && node scripts/verify-registry.mjs",
     "verify:theme": "esbuild src/shared/theme.ts --bundle --platform=node --format=esm --outfile=out/verify/theme.mjs && node scripts/verify-theme.mjs",
@@ -32,6 +32,7 @@
     "verify:configuration": "esbuild src/shared/credentials.ts --bundle --platform=node --format=esm --outfile=out/verify/credentials.mjs && esbuild src/shared/configuration.ts --bundle --platform=node --format=esm --outfile=out/verify/configuration.mjs && node scripts/verify-configuration.mjs",
     "verify:releases": "esbuild src/main/infra/releases.ts --bundle --platform=node --format=esm --outfile=out/verify/releases.mjs && node scripts/verify-releases.mjs",
     "verify:peers": "esbuild src/shared/peers.ts --bundle --platform=node --format=esm --outfile=out/verify/peers.mjs && esbuild src/main/infra/actions.ts --bundle --platform=node --format=esm --outfile=out/verify/actions.mjs && node scripts/verify-peers.mjs",
+    "verify:pairing": "esbuild src/shared/pairing.ts --bundle --platform=node --format=esm --outfile=out/verify/pairing.mjs && node scripts/verify-pairing.mjs",
     "verify:push": "esbuild src/shared/protocol.ts --bundle --platform=node --format=esm --outfile=out/verify/protocol.mjs && node scripts/verify-push.mjs",
     "verify:activity": "esbuild src/renderer/bloom/build/phases.ts --bundle --platform=node --format=esm --outfile=out/verify/phases.mjs && node scripts/verify-activity.mjs",
     "verify:waterfall": "esbuild src/renderer/chat/turn-layout.ts --bundle --platform=node --format=esm --outfile=out/verify/turn-layout.mjs && node scripts/verify-waterfall.mjs",
@@ -42,6 +43,7 @@
     "verify:devices": "esbuild src/main/extensions/system-control/commands.ts --bundle --platform=node --format=esm --outfile=out/verify/system-commands.mjs && esbuild src/main/extensions/system-control/audio.ts --bundle --platform=node --format=esm --outfile=out/verify/system-audio.mjs && esbuild src/main/extensions/system-control/apps.ts --bundle --platform=node --format=esm --outfile=out/verify/system-apps.mjs && esbuild src/shared/audio-state.ts --bundle --platform=node --format=esm --outfile=out/verify/audio-state.mjs && esbuild src/renderer/devices/controls.ts --bundle --platform=node --format=esm --outfile=out/verify/device-controls.mjs && node scripts/verify-devices.mjs"
   },
   "dependencies": {
+    "react-qr-code": "^2.2.0",
     "ssh2": "^1.16.0",
     "ws": "^8.18.0"
   },

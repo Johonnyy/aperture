@@ -29,6 +29,7 @@ import { Extensions } from './pages/Extensions'
 import { TouchDesigner } from './pages/TouchDesigner'
 import { Keywords } from './pages/Keywords'
 import { Operations } from './pages/Operations'
+import { Pairing } from './pages/Pairing'
 import { Terminal } from './pages/Terminal'
 import { Voice } from './pages/Voice'
 import type { SettingsSection } from './tree'
@@ -57,6 +58,17 @@ export const SETTINGS: SettingsSection[] = [
         blurb: 'Where Amber is, and how this app proves it may talk to her.',
         keywords: ['url', 'websocket', 'ws', 'wss', 'token', 'bearer', 'auth', 'session'],
         Content: Connection,
+        children: [
+          {
+            id: 'pairing',
+            label: 'Pair a phone',
+            blurb: 'Hand Aperture mobile this address and token, as one scan.',
+            // The words someone actually has when looking for this: they are holding a
+            // phone and thinking "QR", not "pairing payload".
+            keywords: ['qr', 'phone', 'mobile', 'pair', 'scan', 'camera', 'lan', 'ip'],
+            Content: Pairing,
+          },
+        ],
       },
       {
         id: 'voice',

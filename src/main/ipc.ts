@@ -45,6 +45,7 @@ import {
   updateSettings,
 } from './config'
 import { getDeviceId, getDeviceName, setDeviceName } from './device'
+import { lanAddresses } from './net/lan'
 import { setGrant } from './extensions/grants'
 import { extensionRegistry } from './extensions/registry'
 import * as infra from './infra'
@@ -482,6 +483,10 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
       })
     },
   )
+
+  // Read fresh on every call rather than cached at startup: a laptop changes networks,
+  // and a stale address is exactly the failure pairing exists to avoid.
+  ipcMain.handle(IPC.DEVICE_LAN_ADDRESSES, () => lanAddresses())
 
   ipcMain.handle(IPC.DEVICE_NICKNAMES, () => listNicknames())
 
