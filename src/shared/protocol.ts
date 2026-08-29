@@ -185,6 +185,15 @@ export interface StatusFrame {
   type: 'status'
   session?: {
     id: string
+    /**
+     * Which commit is answering. Versioning is commit-based ecosystem-wide — no
+     * release tags, one image per commit — so the SHA *is* the version, and this is
+     * the only way a connected client learns it without SSH. `unknown` on a local run
+     * or an image CI did not build; render that as "cannot say" rather than hiding the
+     * row, since "no version shown" and "running something nobody can identify" are
+     * different facts.
+     */
+    commit?: string
     turns: number
     max_turns: number
     /** Messages the brain is carrying — what silently grows until replies cost more. */
@@ -226,6 +235,17 @@ export interface StatusFrame {
     }
   }
   features?: Record<string, boolean>
+  /**
+   * The fleet as it stands at the handshake — the same `DeviceRecord` projection
+   * `device_list` carries, and empty when `feature_device_control` is off.
+   *
+   * It rides this frame rather than adding a fifth handshake frame (the four-frame
+   * handshake is asserted by a test server-side). It matters because a client only
+   * starts receiving `device_list` broadcasts once it has *announced*: the registry
+   * iterates registered devices, so this is the one and only fleet a pure controller
+   * would ever see. Seed from here, then let `device_list` replace it wholesale.
+   */
+  devices?: DeviceRecord[]
 }
 
 /**
