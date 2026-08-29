@@ -18,6 +18,7 @@ import {
   isAllowed,
   summarize,
   toolSpecsFor,
+  withChoices,
   type DeviceCapability,
   type ExtensionManifest,
   type ExtensionSummary,
@@ -25,6 +26,8 @@ import {
   type ToolSpecLike,
 } from '../../shared/extensions'
 import { listGrants } from './grants'
+import { listScenes } from './touchdesigner/config'
+import { TD_SWITCH_SCENE_KEY } from './touchdesigner/scenes'
 import { HANDLERS, type ActionContext, type ActionResult } from './handlers'
 import { IMPLEMENTED, MANIFESTS, type ImplementedKey } from './index'
 
@@ -66,7 +69,18 @@ export class ExtensionRegistry {
   capabilities(): DeviceCapability[] {
     const platform = currentPlatform()
     if (!platform) return []
-    return capabilitiesFor(this.manifests, platform, (key) => this.permits(key))
+    const base = capabilitiesFor(this.manifests, platform, (key) => this.permits(key))
+    // The one part of the announce that is not static. Scene names live in the user's
+    // `.toe` file, so no manifest can know them; they are cached on disk and spliced in
+    // here, which is what lets Amber answer "what scenes are there?" from the prompt
+    // instead of spending a turn asking — and what lets a phone draw the desktop's
+    // scene buttons, since `input_schema` already rides `device_list` to every client.
+    //
+    // Here rather than in `ToolBridge.announce` because this method *is* the definition
+    // of what this machine can do: the panel, the announce and any later reader must all
+    // see the same thing. It decorates only — an ungranted `switch_scene` is absent from
+    // `base` and stays absent, so the grant gate is still the only thing that decides.
+    return withChoices(base, TD_SWITCH_SCENE_KEY, { scene: listScenes() })
   }
 
   /** What we declare on `register_tools`. Truncated here rather than by Amber, who caps

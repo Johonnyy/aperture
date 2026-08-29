@@ -80,7 +80,12 @@ export function controlFor(capability: DeviceCapability): ControlSpec {
   if (capability.destructive) return { kind: 'button', label, tone: 'danger' }
 
   const schema = capability.input_schema as
-    | { properties?: Record<string, { type?: string; minimum?: number; maximum?: number }> }
+    | {
+        properties?: Record<
+          string,
+          { type?: string; minimum?: number; maximum?: number; enum?: unknown[] }
+        >
+      }
     | undefined
   const properties = schema?.properties ?? {}
   const names = Object.keys(properties)
@@ -88,6 +93,16 @@ export function controlFor(capability: DeviceCapability): ControlSpec {
 
   const [arg] = names
   const property = properties[arg]
+
+  // A runtime-supplied `enum` is a fixed set of answers, so it is a picker rather than
+  // a text box — and the values are the point, so they travel with the control. This is
+  // how a scene list reaches a phone: the enum rides `input_schema` through Amber's
+  // `device_list` to every client, so no client has to know what a scene is.
+  const options = Array.isArray(property?.enum)
+    ? property.enum.filter((value): value is string => typeof value === 'string' && value.trim() !== '')
+    : []
+  if (options.length) return { kind: 'choice', label, arg, options }
+
   if (
     property?.type === 'number' &&
     typeof property.minimum === 'number' &&
@@ -125,6 +140,14 @@ export function asControlSpec(value: unknown, destructive: boolean): ControlSpec
 
   if (spec.kind === 'toggle' && typeof spec.arg === 'string') {
     return { kind: 'toggle', label, arg: spec.arg }
+  }
+  if (spec.kind === 'choice' && typeof spec.arg === 'string' && Array.isArray(spec.options)) {
+    const options = spec.options.filter(
+      (value): value is string => typeof value === 'string' && value.trim() !== '',
+    )
+    // A picker with nothing to pick is a control that cannot be used, so fall through to
+    // inference instead — which may well find the enum on the schema itself.
+    if (options.length) return { kind: 'choice', label, arg: spec.arg, options }
   }
   if (
     spec.kind === 'slider' &&

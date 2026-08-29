@@ -35,10 +35,30 @@ function check(label, actual, expected) {
   console.log(`${mark} ${label}${detail ? ` — ${detail}` : ''}`)
 }
 
+console.log('\ntransport failures, which must each name their fix\n')
+
+const closed = await request({ baseUrl: 'http://127.0.0.1:59997', token: 't' }, '/health')
+check('a refused connection is `transport`', [closed.ok, closed.code], [false, 'transport'])
+check('  and says so', /nothing is listening/i.test(closed.error), true)
+
+const unresolvable = await request({ baseUrl: 'https://nope.invalid', token: 't' }, '/health', { timeoutMs: 3000 })
+check('an unresolvable host is `transport`', [unresolvable.ok, unresolvable.code], [false, 'transport'])
+check('  and says so', /does not resolve/i.test(unresolvable.error), true)
+
+const malformed = await request({ baseUrl: 'not a url', token: 't' }, '/health')
+check('a malformed base URL is a result, not a throw', [malformed.ok, malformed.code], [false, 'transport'])
+
+// Neither of these may ever read "fetch failed" — that is the message this script exists to prevent.
+check('no error is left as Node\'s bare "fetch failed"', [closed.error, unresolvable.error].some((m) => /fetch failed/i.test(m)), false)
+
+// The live section needs a Bloom; the transport section above deliberately does not,
+// and used to sit below this skip where it never ran on a machine without one. A
+// check that cannot fail is not a check.
 const reachable = await health(good)
 if (!reachable.ok) {
-  console.log(`\n  skip  no Bloom on ${base} — start one to run these checks.\n`)
-  process.exit(0)
+  console.log(`\n  skip  no Bloom on ${base} — start one to run the live checks.`)
+  console.log(failures === 0 ? '\nAll offline checks passed.\n' : `\n${failures} check(s) failed.\n`)
+  process.exit(failures === 0 ? 0 : 1)
 }
 
 console.log('\nagainst a live Bloom\n')
@@ -74,22 +94,6 @@ check('query params serialise, and undefined is skipped', [queried.ok, Array.isA
 
 const slashed = await request({ baseUrl: `${base}/`, token: good.token }, '/health')
 check('a trailing slash on the base URL is harmless', slashed.ok, true)
-
-console.log('\ntransport failures, which must each name their fix\n')
-
-const closed = await request({ baseUrl: 'http://127.0.0.1:59997', token: 't' }, '/health')
-check('a refused connection is `transport`', [closed.ok, closed.code], [false, 'transport'])
-check('  and says so', /nothing is listening/i.test(closed.error), true)
-
-const unresolvable = await request({ baseUrl: 'https://nope.invalid', token: 't' }, '/health', { timeoutMs: 3000 })
-check('an unresolvable host is `transport`', [unresolvable.ok, unresolvable.code], [false, 'transport'])
-check('  and says so', /does not resolve/i.test(unresolvable.error), true)
-
-const malformed = await request({ baseUrl: 'not a url', token: 't' }, '/health')
-check('a malformed base URL is a result, not a throw', [malformed.ok, malformed.code], [false, 'transport'])
-
-// Neither of these may ever read "fetch failed" — that is the message this script exists to prevent.
-check('no error is left as Node\'s bare "fetch failed"', [closed.error, unresolvable.error].some((m) => /fetch failed/i.test(m)), false)
 
 console.log(failures === 0 ? '\nAll checks passed.\n' : `\n${failures} check(s) failed.\n`)
 process.exit(failures === 0 ? 0 : 1)

@@ -580,6 +580,27 @@ function Other({
               className="h-1.5 w-40 cursor-pointer appearance-none rounded-full bg-line accent-accent"
               aria-label={control.label}
             />
+          ) : control.spec.kind === 'choice' ? (
+            // Pills rather than a <select>: the whole set is short, every option is one
+            // tap, and a rig you are switching between scenes on is not somewhere you
+            // want to open a menu first. They wrap, because the list comes from the
+            // device and this build does not get to decide how many there are.
+            <div className="flex flex-wrap justify-end gap-1.5">
+              {control.spec.options.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() =>
+                    onRun(control.action, {
+                      [(control.spec as { arg: string }).arg]: option,
+                    })
+                  }
+                  className="shrink-0 rounded-control border border-line px-2.5 py-1 text-meta text-muted transition-colors hover:bg-ink/5 hover:text-ink"
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
           ) : control.spec.kind === 'toggle' ? (
             <input
               type="checkbox"

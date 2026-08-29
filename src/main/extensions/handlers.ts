@@ -24,7 +24,7 @@
  * every signature.
  */
 
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { shell } from 'electron'
 
 import type { AudioState } from '../../shared/audio-state'
@@ -41,6 +41,12 @@ import {
 } from './system-control/audio'
 import { closeAppCommand, listAppsCommand, parseApps } from './system-control/apps'
 import { commandFor, UnsupportedPlatformError } from './system-control/commands'
+import { sendCommand } from './touchdesigner/bridge'
+import { getTdConfig, notifyScenesChanged, setScenes } from './touchdesigner/config'
+import { launchCommand, tdProcessName } from './touchdesigner/process'
+import { resolveProject } from './touchdesigner/projects'
+import { cancelScenesProbe, refreshScenes, scheduleScenesProbe } from './touchdesigner/refresh'
+import { extractScenes } from './touchdesigner/scenes'
 
 export interface ActionContext {
   /** Which platform we are actually running on. */
@@ -114,6 +120,65 @@ function build<T>(make: () => T): { value: T } | { error: ActionResult } {
     }
     throw error
   }
+}
+
+/** How long a passthrough result may run before it is cut. Amber clamps anyway. */
+const MAX_PASSTHROUGH_CHARS = 800
+
+/**
+ * How long to wait before calling a detached launch successful.
+ *
+ * `ENOENT` for a bad executable path arrives on the next tick; anything after that is
+ * the application's own business, not a launch failure. Waiting for exit — which is what
+ * `run()` does — would mean waiting for the user to close TouchDesigner.
+ */
+const LAUNCH_SETTLE_MS = 400
+
+/**
+ * Start a long-lived GUI application and let go of it.
+ *
+ * **Not `run()`**: that helper passes `timeout` to `execFile`, which would kill
+ * TouchDesigner `timeoutMs` after starting it. Still argv, still no shell — see
+ * `touchdesigner/process.ts` for why this is a narrow amendment to that rule rather than
+ * an exception to it.
+ */
+function launchDetached(file: string, args: string[]): Promise<{ ok: boolean; detail: string }> {
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>
+    try {
+      child = spawn(file, args, { detached: true, stdio: 'ignore', windowsHide: true })
+    } catch (error) {
+      resolve({ ok: false, detail: error instanceof Error ? error.message : String(error) })
+      return
+    }
+
+    let settled = false
+    let timer: NodeJS.Timeout | null = null
+    const done = (ok: boolean, detail: string): void => {
+      if (settled) return
+      settled = true
+      if (timer) clearTimeout(timer)
+      resolve({ ok, detail })
+    }
+
+    child.once('error', (error) => done(false, error.message))
+    timer = setTimeout(() => {
+      child.unref()
+      done(true, '')
+    }, LAUNCH_SETTLE_MS)
+  })
+}
+
+/**
+ * Name the port on a transport failure, but never on a refusal.
+ *
+ * "Nothing is listening" is answered by checking the port; "no scene called drop" is
+ * not, and appending wiring advice to it would send someone to the wrong place.
+ */
+function bridgeFailure(result: { kind: 'transport' | 'project'; error: string }, port: number): string {
+  return result.kind === 'transport'
+    ? `${result.error} TouchDesigner's Web Server DAT should be listening on 127.0.0.1:${port}.`
+    : result.error
 }
 
 /** Both power actions are the same shape; only the command and the wording differ. */
@@ -316,6 +381,126 @@ export const HANDLERS: Record<ImplementedKey, ActionHandler> = {
     return failure
       ? { message: `Couldn't open ${path}: ${failure}`, isError: true }
       : { message: `Opened ${path}.` }
+  },
+
+  // --- TouchDesigner ------------------------------------------------------------
+  // Aperture is the wire; the meaning lives in the user's `.toe`. See `bridge.ts`.
+
+  'touchdesigner.process.launch': async (args) => {
+    const config = getTdConfig()
+    const resolved = resolveProject(
+      config.projects,
+      typeof args.project === 'string' ? args.project : undefined,
+      config.defaultProjectId,
+    )
+    if ('error' in resolved) return { message: `Error: ${resolved.error}`, isError: true }
+    const { project } = resolved
+    if (!project.path) {
+      return {
+        message: `Error: "${project.name}" has no .toe file set. Add one in Settings → TouchDesigner.`,
+        isError: true,
+      }
+    }
+
+    if (config.executablePath) {
+      const built = build(() => launchCommand(config.executablePath, project.path))
+      if ('error' in built) return built.error
+      const started = await launchDetached(built.value.file, built.value.args)
+      if (!started.ok) {
+        return { message: `Couldn't launch TouchDesigner: ${started.detail}`, isError: true }
+      }
+    } else {
+      // No executable configured, so let the OS association open the project. This is
+      // the same route `system-control.process.launch` takes, and it cannot pass args.
+      const failure = await shell.openPath(project.path)
+      if (failure) return { message: `Couldn't open ${project.path}: ${failure}`, isError: true }
+    }
+
+    // Scenes are unknowable until the project is up, which takes seconds. The burst is
+    // bounded and cancellable; `after` keeps it behind the reply.
+    return {
+      message: `Opening "${project.name}". TouchDesigner takes a few seconds to come up, so give it a moment before switching scenes.`,
+      after: scheduleScenesProbe,
+    }
+  },
+
+  'touchdesigner.process.close': async (_args, ctx) => {
+    const configured = getTdConfig().processName
+    const built = build(() => configured || tdProcessName(ctx.platform))
+    if ('error' in built) return built.error
+    const name = built.value
+    const command = build(() => closeAppCommand(ctx.platform, name))
+    if ('error' in command) return command.error
+    const { file, args: argv } = command.value
+
+    const result = await run(file, argv, ctx.timeoutMs)
+    // Cancel the post-launch burst: probing a project that is closing is noise.
+    cancelScenesProbe()
+    return result.ok
+      ? { message: `Asked TouchDesigner to close. Nothing was force-closed, so an unsaved project can refuse.` }
+      : {
+          message:
+            `Couldn't close TouchDesigner — it may not be running, or it refused. ` +
+            `Nothing was force-closed. (${result.detail})`,
+          isError: true,
+        }
+  },
+
+  'touchdesigner.switch_scene': async (args, ctx) => {
+    const scene = String(args.scene ?? '').trim()
+    if (!scene) return { message: 'Error: no scene was given.', isError: true }
+
+    const { bridgePort } = getTdConfig()
+    const result = await sendCommand(bridgePort, 'switch_scene', { scene }, ctx.timeoutMs)
+    if (!result.ok) return { message: bridgeFailure(result, bridgePort), isError: true }
+
+    // A project is free to echo its scene list back; take it when offered rather than
+    // spending a second round trip on it.
+    const echoed = extractScenes(result.result)
+    const changed = echoed ? setScenes(echoed) : false
+    return {
+      message: `Switched to "${scene}".`,
+      ...(changed ? { after: notifyScenesChanged } : {}),
+    }
+  },
+
+  'touchdesigner.list_scenes': async (_args, ctx) => {
+    const { bridgePort } = getTdConfig()
+    const outcome = await refreshScenes(ctx.timeoutMs)
+    if (!outcome.ok) {
+      const error = outcome.error ?? 'The project did not answer.'
+      return {
+        message: error.includes('listening') ? bridgeFailure({ kind: 'transport', error }, bridgePort) : error,
+        isError: true,
+      }
+    }
+    return {
+      message: outcome.scenes.length
+        ? `Scenes: ${outcome.scenes.join(', ')}.`
+        : 'The project reports no scenes.',
+      ...(outcome.changed ? { after: notifyScenesChanged } : {}),
+    }
+  },
+
+  'touchdesigner.send_command': async (args, ctx) => {
+    const command = String(args.command ?? '').trim()
+    if (!command) return { message: 'Error: no command was given.', isError: true }
+
+    const { bridgePort } = getTdConfig()
+    const result = await sendCommand(bridgePort, command, args.args, ctx.timeoutMs)
+    if (!result.ok) return { message: bridgeFailure(result, bridgePort), isError: true }
+
+    // Handed back verbatim: this is the escape hatch, and knowing the shape would defeat
+    // the point. Capped because Amber clamps the result anyway, and a blob truncated
+    // mid-token reads worse than a short one that says it was cut.
+    const rendered = JSON.stringify(result.result)
+    if (rendered === '{}') return { message: `${command} ran.` }
+    return {
+      message:
+        rendered.length > MAX_PASSTHROUGH_CHARS
+          ? `${rendered.slice(0, MAX_PASSTHROUGH_CHARS)}… (result truncated)`
+          : rendered,
+    }
   },
 }
 

@@ -15,6 +15,17 @@ import type {
   Settings,
 } from '../shared/types'
 import type { AmberConnection } from './amber/connection'
+import type { TdConfig, TdProbeResult, TdProject } from '../shared/touchdesigner'
+import { declareSelf } from './amber/declare'
+import { sendCommand } from './extensions/touchdesigner/bridge'
+import {
+  addProject,
+  getTdConfig,
+  removeProject,
+  updateProject,
+  updateTdSettings,
+} from './extensions/touchdesigner/config'
+import { refreshScenes } from './extensions/touchdesigner/refresh'
 import type { ToolBridge } from './amber/tool-bridge'
 import { listModels } from './amber/catalogue'
 import { applyModel, remapKeyword } from './amber/model'
@@ -478,6 +489,73 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
     setNickname(deviceId, nickname),
   )
 
+  // --- touchdesigner --------------------------------------------------------
+  //
+  // Every mutation re-declares. The announced `switch_scene` schema carries the cached
+  // scene list as an enum and the tool specs name the projects, so a change here is a
+  // change to what this machine advertises — and Amber refuses anything a device did not
+  // announce, which is what makes an edit take effect rather than merely persist.
+
+  // Bound once here: `declareSelf` takes the bridge because `index.ts` owns a nullable
+  // module-scoped one while this function receives a non-null parameter.
+  const redeclare = (): void => declareSelf(bridge)
+
+  ipcMain.handle(IPC.TOUCHDESIGNER_CONFIG, (): TdConfig => getTdConfig())
+
+  ipcMain.handle(IPC.TOUCHDESIGNER_SET_CONFIG, (_e, patch: Partial<TdConfig>): TdConfig => {
+    const { config, scenesCleared } = updateTdSettings(patch)
+    if (scenesCleared) redeclare()
+    return config
+  })
+
+  ipcMain.handle(IPC.TOUCHDESIGNER_ADD_PROJECT, (_e, input: { name: string; path: string }) => {
+    const result = addProject(input)
+    if ('project' in result) redeclare()
+    return result
+  })
+
+  ipcMain.handle(IPC.TOUCHDESIGNER_UPDATE_PROJECT, (_e, id: string, patch: { name?: string; path?: string }) => {
+    const result = updateProject(id, patch)
+    if ('project' in result) redeclare()
+    return result
+  })
+
+  ipcMain.handle(IPC.TOUCHDESIGNER_REMOVE_PROJECT, (_e, id: string): TdProject[] => {
+    const projects = removeProject(id)
+    redeclare()
+    return projects
+  })
+
+  // Deliberately **not** routed through `ExtensionRegistry`, so it needs no grant.
+  //
+  // This is a local diagnostic someone pressed a button for on their own machine, not
+  // something Amber asked for. Making you grant a permission before you can find out
+  // whether your own port is open would put the consent screen in front of the thing
+  // that makes consent informed. It reads and writes only this machine's own cache.
+  ipcMain.handle(IPC.TOUCHDESIGNER_PROBE, async (): Promise<TdProbeResult> => {
+    const { bridgePort } = getTdConfig()
+    const status = await sendCommand(bridgePort, 'status', {}, 4000)
+    const outcome = await refreshScenes(4000)
+    if (outcome.changed) redeclare()
+
+    if (!status.ok && !outcome.ok) {
+      return { ok: false, message: status.error, scenes: outcome.scenes }
+    }
+    const currentScene = status.ok && typeof status.result.current_scene === 'string'
+      ? status.result.current_scene
+      : undefined
+    const where = currentScene ? ` It reports "${currentScene}" showing now.` : ''
+    const found = outcome.ok
+      ? ` ${outcome.scenes.length} scene(s): ${outcome.scenes.join(', ') || 'none'}.`
+      : ' It did not report a scene list.'
+    return {
+      ok: true,
+      message: `TouchDesigner answered on 127.0.0.1:${bridgePort}.${where}${found}`,
+      scenes: outcome.scenes,
+      ...(currentScene ? { currentScene } : {}),
+    }
+  })
+
   ipcMain.handle(IPC.EXTENSIONS_LIST, () => extensionRegistry.describe())
 
   ipcMain.handle(IPC.EXTENSIONS_SET_GRANT, (_e, key: string, granted: boolean) => {
@@ -487,8 +565,7 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
     // A grant changes what this machine can do, so both declarations are stale. Amber
     // refuses anything a device didn't announce, which is what makes revoking here
     // enforce on her side too rather than only hiding a button.
-    bridge.register()
-    bridge.announce(getDeviceId(), getDeviceName(), app.getVersion())
+    declareSelf(bridge)
     return summaries
   })
 

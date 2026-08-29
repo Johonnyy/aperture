@@ -307,7 +307,7 @@ for (const platform of PLATFORMS) {
 
   // A device this build has never heard of still renders. This is the property that
   // keeps the panel honest for Aperture mobile and for TouchDesigner.
-  const foreign = surfaceFor([{ action: 'notify.toast' }, { action: 'td.trigger' }])
+  const foreign = surfaceFor([{ action: 'notify.toast' }, { action: 'touchdesigner.list_scenes' }])
   if (foreign.audio || foreign.apps || foreign.power.length) {
     fail('a foreign device produced bespoke sections it never announced')
   }
@@ -346,6 +346,55 @@ for (const platform of PLATFORMS) {
     fail(`a boolean did not become a toggle: ${JSON.stringify(toggle)}`)
   }
 
+  // --- a runtime enum is a picker ---
+  //
+  // The values are not in any manifest: TouchDesigner scene names live in the user's
+  // .toe file, reach Amber on `device_announce`, and come back out to every client on
+  // `device_list`. That is what lets a phone draw the desktop's scene buttons without
+  // knowing what a scene is — so the inference has to survive the round trip intact.
+  const choice = controlFor({
+    action: 'touchdesigner.switch_scene',
+    input_schema: {
+      properties: { scene: { type: 'string', enum: ['ambient', 'spotify', 'ps5'] } },
+      required: ['scene'],
+    },
+  })
+  if (choice.kind !== 'choice' || choice.arg !== 'scene' || choice.options.length !== 3) {
+    fail(`a string enum did not become a picker: ${JSON.stringify(choice)}`)
+  }
+  // Weight matches consequence, restated for the new kind: a remote machine describing
+  // something destructive as a tidy list of options must not get one.
+  const dangerousChoice = controlFor({
+    action: 'ext.wipe',
+    destructive: true,
+    input_schema: { properties: { target: { type: 'string', enum: ['all', 'some'] } } },
+  })
+  if (dangerousChoice.kind !== 'button' || dangerousChoice.tone !== 'danger') {
+    fail(`a destructive enum rendered as ${dangerousChoice.kind}, not a danger button`)
+  }
+  // Each of these would draw a picker with nothing usable in it.
+  for (const [label, schema] of [
+    ['an empty enum', { properties: { scene: { type: 'string', enum: [] } } }],
+    ['an enum of numbers', { properties: { scene: { type: 'string', enum: [1, 2] } } }],
+    ['an enum of blanks', { properties: { scene: { type: 'string', enum: ['', '  '] } } }],
+    ['a non-array enum', { properties: { scene: { type: 'string', enum: 'a,b' } } }],
+    [
+      'an enum on a two-property schema',
+      { properties: { scene: { type: 'string', enum: ['a'] }, other: { type: 'string' } } },
+    ],
+  ]) {
+    const inferred = controlFor({ action: 'ext.pick', input_schema: schema })
+    if (inferred.kind === 'choice') fail(`${label} still produced a picker`)
+  }
+  // A plain string property is unchanged by any of this — it was a button before.
+  const plainString = controlFor({
+    action: 'ext.name',
+    input_schema: { properties: { name: { type: 'string' } } },
+  })
+  if (plainString.kind !== 'button') {
+    fail(`a plain string property became ${plainString.kind}, changing existing behaviour`)
+  }
+
   // --- a control hint from the wire is untrusted data, not a ControlSpec ---
   //
   // It arrives from another machine. Every shape below renders something silently broken
@@ -376,6 +425,31 @@ for (const platform of PLATFORMS) {
   const coerced = asControlSpec({ kind: 'toggle', label: 'Shut down', arg: 'on' }, true)
   if (coerced?.kind !== 'button' || coerced.tone !== 'danger') {
     fail(`a destructive capability was allowed a ${coerced?.kind} control`)
+  }
+
+  const goodChoice = asControlSpec(
+    { kind: 'choice', label: 'Scene', arg: 'scene', options: ['a', 'b'] },
+    false,
+  )
+  if (goodChoice?.kind !== 'choice' || goodChoice.options.length !== 2) {
+    fail(`asControlSpec rejected a valid choice hint: ${JSON.stringify(goodChoice)}`)
+  }
+  for (const bad of [
+    { kind: 'choice', label: 'S', arg: 'scene' },
+    { kind: 'choice', label: 'S', arg: 'scene', options: [] },
+    { kind: 'choice', label: 'S', arg: 'scene', options: [1, 2] },
+    { kind: 'choice', label: 'S', options: ['a'] },
+  ]) {
+    if (asControlSpec(bad, false) !== null) {
+      fail(`asControlSpec accepted a broken choice hint: ${JSON.stringify(bad)}`)
+    }
+  }
+  const coercedChoice = asControlSpec(
+    { kind: 'choice', label: 'Wipe', arg: 'target', options: ['all'] },
+    true,
+  )
+  if (coercedChoice?.kind !== 'button' || coercedChoice.tone !== 'danger') {
+    fail('a destructive capability was allowed a choice control')
   }
 }
 

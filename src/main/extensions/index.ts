@@ -25,10 +25,12 @@
 import type { ExtensionManifest } from '../../shared/extensions'
 import sshManifest from './ssh-terminal/manifest.json'
 import systemManifest from './system-control/manifest.json'
+import tdManifest from './touchdesigner/manifest.json'
 
 export const MANIFESTS: ExtensionManifest[] = [
   sshManifest as ExtensionManifest,
   systemManifest as ExtensionManifest,
+  tdManifest as ExtensionManifest,
 ]
 
 /**
@@ -51,6 +53,11 @@ export const IMPLEMENTED = [
   'system-control.process.list',
   'system-control.process.close',
   'system-control.process.launch',
+  'touchdesigner.process.launch',
+  'touchdesigner.process.close',
+  'touchdesigner.switch_scene',
+  'touchdesigner.list_scenes',
+  'touchdesigner.send_command',
 ] as const
 
 export type ImplementedKey = (typeof IMPLEMENTED)[number]

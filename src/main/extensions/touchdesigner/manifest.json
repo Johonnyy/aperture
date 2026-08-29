@@ -1,0 +1,104 @@
+{
+  "id": "touchdesigner",
+  "name": "TouchDesigner",
+  "version": "1.0.0",
+  "description": "Opens TouchDesigner projects and forwards commands to a Web Server DAT inside them. Aperture is only the wire — what a command means is decided by your .toe file, not by this app.",
+  "permissions": [
+    "network",
+    "process"
+  ],
+  "actions": [
+    {
+      "name": "process.launch",
+      "description": "Open one of the TouchDesigner projects configured on this machine. Names a project set up in Aperture's settings, not a file path. It takes several seconds to come up, so a command sent straight afterwards may find nothing listening yet.",
+      "timeoutMs": 5000,
+      "platforms": [
+        "win32",
+        "darwin"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Which configured project to open. Omit to use the default."
+          }
+        }
+      }
+    },
+    {
+      "name": "process.close",
+      "description": "Ask TouchDesigner to close. Nothing is force-closed, so a project with unsaved work can refuse and put a save dialog on that machine's own screen.",
+      "destructive": true,
+      "timeoutMs": 5000,
+      "platforms": [
+        "win32",
+        "darwin"
+      ],
+      "control": {
+        "kind": "button",
+        "label": "Close",
+        "tone": "danger"
+      }
+    },
+    {
+      "name": "switch_scene",
+      "description": "Switch the running TouchDesigner project to one of its scenes. Only the names the project itself reports are real; if none are listed, or one is rejected, call list_scenes rather than guessing — the list can be out of date.",
+      "timeoutMs": 4000,
+      "platforms": [
+        "win32",
+        "darwin"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "scene": {
+            "type": "string",
+            "description": "Scene name, exactly as the project reports it."
+          }
+        },
+        "required": [
+          "scene"
+        ]
+      }
+    },
+    {
+      "name": "list_scenes",
+      "description": "Ask the running TouchDesigner project which scenes it has, and remember the answer. Worth calling when the listed scenes look stale or empty, or after one was rejected.",
+      "timeoutMs": 4000,
+      "platforms": [
+        "win32",
+        "darwin"
+      ],
+      "control": {
+        "kind": "button",
+        "label": "List scenes"
+      }
+    },
+    {
+      "name": "send_command",
+      "description": "Send any other command the TouchDesigner project implements. Aperture does not know what commands exist — the project decides, and an unknown one comes back as an error rather than silently doing nothing.",
+      "timeoutMs": 7000,
+      "platforms": [
+        "win32",
+        "darwin"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "Command name the project implements."
+          },
+          "args": {
+            "type": "object",
+            "description": "Arguments for it. Omit when it takes none."
+          }
+        },
+        "required": [
+          "command"
+        ]
+      }
+    }
+  ]
+}

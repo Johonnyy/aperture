@@ -101,6 +101,13 @@ export const IPC = {
   DEVICE_SET_NICKNAME: 'device:set-nickname',
 
   /** What is installed, what it may do, and which permissions have been granted. */
+  TOUCHDESIGNER_CONFIG: 'touchdesigner:config',
+  TOUCHDESIGNER_SET_CONFIG: 'touchdesigner:set-config',
+  TOUCHDESIGNER_ADD_PROJECT: 'touchdesigner:add-project',
+  TOUCHDESIGNER_UPDATE_PROJECT: 'touchdesigner:update-project',
+  TOUCHDESIGNER_REMOVE_PROJECT: 'touchdesigner:remove-project',
+  TOUCHDESIGNER_PROBE: 'touchdesigner:probe',
+
   EXTENSIONS_LIST: 'extensions:list',
   EXTENSIONS_SET_GRANT: 'extensions:set-grant',
 

@@ -18,6 +18,7 @@ import type {
 } from '../shared/bloom'
 import type { ExtensionSummary } from '../shared/extensions'
 import { IPC } from '../shared/ipc'
+import type { TdConfig, TdProbeResult, TdProject } from '../shared/touchdesigner'
 import type { CatalogueModel } from '../shared/models'
 import type {
   ApertureEvent,
@@ -509,6 +510,23 @@ const api = {
       ipcRenderer.invoke(IPC.DEVICE_NICKNAMES),
     setNickname: (deviceId: string, nickname: string): Promise<Record<string, string>> =>
       ipcRenderer.invoke(IPC.DEVICE_SET_NICKNAME, deviceId, nickname),
+  },
+
+  touchdesigner: {
+    config: (): Promise<TdConfig> => ipcRenderer.invoke(IPC.TOUCHDESIGNER_CONFIG),
+    setConfig: (patch: Partial<TdConfig>): Promise<TdConfig> =>
+      ipcRenderer.invoke(IPC.TOUCHDESIGNER_SET_CONFIG, patch),
+    addProject: (input: { name: string; path: string }): Promise<{ project: TdProject } | { error: string }> =>
+      ipcRenderer.invoke(IPC.TOUCHDESIGNER_ADD_PROJECT, input),
+    updateProject: (
+      id: string,
+      patch: { name?: string; path?: string },
+    ): Promise<{ project: TdProject } | { error: string }> =>
+      ipcRenderer.invoke(IPC.TOUCHDESIGNER_UPDATE_PROJECT, id, patch),
+    removeProject: (id: string): Promise<TdProject[]> =>
+      ipcRenderer.invoke(IPC.TOUCHDESIGNER_REMOVE_PROJECT, id),
+    /** Asks the project for `status` and refreshes the scene cache. No grant needed. */
+    probe: (): Promise<TdProbeResult> => ipcRenderer.invoke(IPC.TOUCHDESIGNER_PROBE),
   },
 
   extensions: {

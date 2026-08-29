@@ -12,7 +12,8 @@ import { verifyLink } from './bloom/link'
 import { hold as holdDeepLink, parseDeepLink } from './bloom/deep-link'
 import { closeAllRunStreams } from './bloom/run-stream'
 import { getSettings } from './config'
-import { getDeviceId, getDeviceName } from './device'
+import { declareSelf } from './amber/declare'
+import { onScenesChanged } from './extensions/touchdesigner/config'
 import { registerIpc } from './ipc'
 import { closeAllShells } from './ssh/ssh-client'
 import { createWindow } from './window'
@@ -20,6 +21,11 @@ import { createWindow } from './window'
 let mainWindow: BrowserWindow | null = null
 let amber: AmberConnection | null = null
 let bridge: ToolBridge | null = null
+
+/** This machine's tools and capabilities, re-declared together. See `amber/declare.ts`. */
+function redeclare(): void {
+  declareSelf(bridge)
+}
 
 /**
  * The single-instance lock, before anything else.
@@ -111,14 +117,11 @@ function buildConnection(): AmberConnection {
   connection.on('frame', (frame) => {
     emit({ kind: 'frame', frame })
     if (frame.type === 'ready') {
-      // Re-declare on every ready. Amber keeps declared specs across a reconnect,
-      // so without this a stale build's tools stay advertised to the model.
-      bridge?.register()
-      // And announce this machine as an addressable device. Same rule again, and for a
-      // sharper reason: Amber holds a device on the *connection*, not the session, so a
-      // reconnect that didn't re-announce would leave this machine invisible to every
-      // other client until the app was restarted.
-      bridge?.announce(getDeviceId(), getDeviceName(), app.getVersion())
+      // Re-declare on every ready. Amber keeps declared specs across a reconnect, so
+      // without this a stale build's tools stay advertised to the model — and she holds a
+      // device on the *connection*, not the session, so a reconnect that didn't announce
+      // would leave this machine invisible to every other client until a restart.
+      redeclare()
       // Same reasoning for the voice: it lives on Amber's session, so a resume past
       // the TTL would silently drop back to the server default. The chosen brain is
       // session state too, and re-asserted here for exactly the same reason.
@@ -187,6 +190,11 @@ app.whenReady().then(() => {
 
   amber = buildConnection()
   bridge = new ToolBridge(amber, emit)
+  // A changed scene list changes what this machine announces, and the handler that read
+  // it has no way to reach the bridge — it gets only `ctx`. This is that link, and it is
+  // driven from `after`, so the announce always lands behind the tool result it came
+  // from rather than interleaving with it.
+  onScenesChanged(redeclare)
   registerIpc({ amber, bridge, emit })
 
   mainWindow = createWindow()

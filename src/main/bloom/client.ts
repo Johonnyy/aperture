@@ -15,6 +15,7 @@ import type {
   TestRunStarted,
   UsageReport,
 } from '../../shared/bloom'
+import { describeFetchError } from '../net/fetch-error'
 import {
   fromAgentInput,
   fromConnectionDraft,
@@ -135,7 +136,15 @@ export async function request<T>(
       signal: AbortSignal.timeout(init.timeoutMs ?? DEFAULT_TIMEOUT_MS),
     })
   } catch (err) {
-    return { ok: false, code: 'transport', error: describe(err, init.timeoutMs) }
+    return {
+      ok: false,
+      code: 'transport',
+      error: describeFetchError(err, {
+        subject: 'Bloom',
+        timeoutMs: init.timeoutMs,
+        defaultTimeoutMs: DEFAULT_TIMEOUT_MS,
+      }),
+    }
   }
 
   if (response.status === 204) return { ok: true, value: undefined as T }
@@ -167,52 +176,6 @@ export async function request<T>(
     error: `Bloom's address answered with HTTP ${response.status}, but not in Bloom's voice. Something else may be serving it.`,
     status: response.status,
   }
-}
-
-/**
- * Turn a thrown fetch into a sentence that names the fix.
- *
- * **The cause chain is the whole job.** Node's `fetch` reports every network failure
- * as a bare `TypeError: fetch failed` and puts the actual reason — `ECONNREFUSED`,
- * `ENOTFOUND`, a certificate error — on `err.cause`, sometimes nested a second time.
- * Matching only `err.message` produces "Could not reach Bloom: fetch failed", which
- * is exactly the kind of non-answer the rest of this codebase goes out of its way to
- * avoid. Walk the chain and match against everything in it.
- */
-function describe(err: unknown, timeoutMs?: number): string {
-  const name = (err as { name?: string })?.name
-  if (name === 'TimeoutError' || name === 'AbortError') {
-    return `Timed out after ${Math.round((timeoutMs ?? DEFAULT_TIMEOUT_MS) / 1000)}s.`
-  }
-
-  // Depth-capped: a malformed chain must not spin here.
-  const parts: string[] = []
-  let current: unknown = err
-  for (let depth = 0; current && depth < 5; depth += 1) {
-    const layer = current as { message?: string; code?: string; cause?: unknown }
-    if (layer.code) parts.push(layer.code)
-    if (layer.message) parts.push(layer.message)
-    current = layer.cause
-  }
-  const text = parts.join(' ') || String(err)
-
-  if (/ECONNREFUSED/i.test(text)) {
-    return 'Nothing is listening at that address. Check the port, or that Bloom is running.'
-  }
-  if (/ENOTFOUND|EAI_AGAIN|getaddrinfo/i.test(text)) {
-    return 'That address does not resolve. Check the domain, or that DNS is reachable.'
-  }
-  if (/certificate|self.signed|CERT_|UNABLE_TO_VERIFY/i.test(text)) {
-    return "Could not verify Bloom's TLS certificate. A self-signed instance is not supported here."
-  }
-  if (/ETIMEDOUT|EHOSTUNREACH|ENETUNREACH/i.test(text)) {
-    return 'That address did not answer. The box may be down, or a firewall is in the way.'
-  }
-  if (/ECONNRESET|EPIPE|socket hang up/i.test(text)) {
-    return 'The connection was closed before Bloom answered.'
-  }
-  // Prefer the innermost message: the outer one is always "fetch failed".
-  return `Could not reach Bloom: ${parts[parts.length - 1] ?? text}`
 }
 
 export interface HealthReport {

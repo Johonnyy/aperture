@@ -90,6 +90,7 @@ export type ControlSpec =
   | { kind: 'button'; label: string; tone?: 'default' | 'danger' }
   | { kind: 'toggle'; label: string; arg: string }
   | { kind: 'slider'; label: string; arg: string; min: number; max: number; step?: number }
+  | { kind: 'choice'; label: string; arg: string; options: string[] }
 
 export interface ActionDef {
   /** Bare and dotted, e.g. `power.sleep`. The wire key is `${extensionId}.${name}`. */
@@ -206,6 +207,85 @@ export function capabilitiesFor(
     }
   }
   return out
+}
+
+/** Ceilings on a runtime-supplied enum. The binding constraint is not this process —
+ *  it is the 900 characters Amber gives the whole fleet block, which every turn pays for. */
+export const MAX_CHOICES = 24
+export const MAX_CHOICE_CHARS = 64
+
+/**
+ * Splice values only known at runtime into an announced capability's schema.
+ *
+ * The scene names in a TouchDesigner project live in the user's `.toe` file, so no
+ * manifest can ever contain them. They are read at runtime, cached, and spliced in here
+ * as an `enum`, which is what lets Amber answer "what scenes are there?" from the system
+ * prompt instead of spending a turn asking — and lets a phone render the desktop's scene
+ * buttons, since `input_schema` already rides `device_list` to every client.
+ *
+ * Four rules, each of which is a bug if broken, and each asserted by `verify:touchdesigner`:
+ *
+ * **It decorates; it never adds.** A capability absent from `capabilities` — ungranted,
+ * unimplemented, wrong platform — stays absent. The grant gate remains the only thing
+ * deciding what this machine announces.
+ *
+ * **Copy-on-write, all the way down to the property object.** `MANIFESTS` is a module
+ * singleton of Rollup-inlined JSON, also read by `summarize()` and the Settings page.
+ * Mutating it would leak the enum into both with no way to clear it.
+ *
+ * **An empty list writes nothing.** `enum: []` is a schema no value satisfies, so it
+ * would make the action *uncallable* rather than unconstrained — the opposite of the
+ * intent, and silent.
+ *
+ * **A property the manifest never declared is left alone**, so a typo in the arg name
+ * fails the "the real manifest produces an enum" assertion instead of shipping a no-op.
+ */
+export function withChoices(
+  capabilities: DeviceCapability[],
+  action: string,
+  enums: Record<string, readonly string[]>,
+): DeviceCapability[] {
+  const clean: Record<string, string[]> = {}
+  for (const [arg, values] of Object.entries(enums)) {
+    if (!Array.isArray(values)) continue
+    const seen = new Set<string>()
+    const kept: string[] = []
+    for (const value of values) {
+      if (typeof value !== 'string') continue
+      const trimmed = value.trim()
+      if (!trimmed || trimmed.length > MAX_CHOICE_CHARS || seen.has(trimmed)) continue
+      seen.add(trimmed)
+      kept.push(trimmed)
+      if (kept.length >= MAX_CHOICES) break
+    }
+    if (kept.length) clean[arg] = kept
+  }
+  if (Object.keys(clean).length === 0) return capabilities
+
+  const index = capabilities.findIndex((capability) => capability.action === action)
+  if (index === -1) return capabilities
+
+  const target = capabilities[index]
+  const schema = target.input_schema as { properties?: Record<string, unknown> } | undefined
+  const properties = schema?.properties
+  if (!properties || typeof properties !== 'object') return capabilities
+
+  const applicable = Object.entries(clean).filter(
+    ([arg]) => properties[arg] && typeof properties[arg] === 'object',
+  )
+  if (applicable.length === 0) return capabilities
+
+  const nextProperties: Record<string, unknown> = { ...properties }
+  for (const [arg, values] of applicable) {
+    nextProperties[arg] = { ...(properties[arg] as Record<string, unknown>), enum: values }
+  }
+
+  const next = [...capabilities]
+  next[index] = {
+    ...target,
+    input_schema: { ...(target.input_schema as Record<string, unknown>), properties: nextProperties },
+  }
+  return next
 }
 
 /**

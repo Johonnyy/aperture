@@ -26,6 +26,7 @@ import { Bloom } from './pages/Bloom'
 import { Brain } from './pages/Brain'
 import { Connection } from './pages/Connection'
 import { Extensions } from './pages/Extensions'
+import { TouchDesigner } from './pages/TouchDesigner'
 import { Keywords } from './pages/Keywords'
 import { Operations } from './pages/Operations'
 import { Terminal } from './pages/Terminal'
@@ -103,6 +104,24 @@ export const SETTINGS: SettingsSection[] = [
           'consent',
         ],
         Content: Extensions,
+      },
+      {
+        id: 'touchdesigner',
+        label: 'TouchDesigner',
+        blurb: 'Which projects this machine can open, and the port their Web Server DAT listens on.',
+        keywords: [
+          'td',
+          'toe',
+          'web server dat',
+          'port',
+          'scene',
+          'preset',
+          'visuals',
+          'projector',
+          'localhost',
+          '9980',
+        ],
+        Content: TouchDesigner,
       },
     ],
   },
