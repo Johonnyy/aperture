@@ -111,7 +111,7 @@
     },
     {
       "name": "process.list",
-      "description": "List the applications currently running on this machine.",
+      "description": "List the applications currently running on this machine. This is the check to wait on after opening something: pass it to wait_for with the executable name as until_contains, rather than listing twice and guessing in between.",
       "timeoutMs": 6000,
       "platforms": [
         "win32",

@@ -156,6 +156,16 @@ const api = {
       action: 'promote' | 'dismiss' | 'archive',
       id: number,
     ): Promise<boolean> => ipcRenderer.invoke(IPC.AMBER_REVIEW_ACTION, topic, action, id),
+    /**
+     * Stop a background watch.
+     *
+     * Answered with a fresh `status` frame rather than a bespoke one — its `waits`
+     * section is the listing this acts on. There is no matching "start a watch": one
+     * exists because Amber's own `wait_for` outlived its turn, and offering a second
+     * way to create one would be a second owner of the same thing.
+     */
+    cancelWait: (id: string): Promise<boolean> =>
+      ipcRenderer.invoke(IPC.AMBER_WAIT_CANCEL, id),
     /** Save the turn on screen as a regression case, replayable by `python -m app.evals`. */
     captureEval: (payload: {
       query: string

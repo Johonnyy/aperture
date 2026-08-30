@@ -33,6 +33,8 @@ export const IPC = {
   AMBER_REVIEW_ACTION: 'amber:review-action',
   /** Save the turn on screen as a regression case. */
   AMBER_EVAL_CAPTURE: 'amber:eval-capture',
+  /** Stop a background watch. There is deliberately no "start one" — Amber owns that. */
+  AMBER_WAIT_CANCEL: 'amber:wait-cancel',
   /** OpenRouter's public model list, to suggest ids for the field above. */
   AMBER_MODEL_CATALOGUE: 'amber:model-catalogue',
 

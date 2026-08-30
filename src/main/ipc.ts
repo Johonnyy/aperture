@@ -453,6 +453,14 @@ export function registerIpc({ amber, bridge, emit }: IpcContext): void {
   ipcMain.handle(IPC.BRIDGE_DENY, (_e, id: string) => bridge.resolveApproval(id, false))
   ipcMain.handle(IPC.BRIDGE_PENDING, () => bridge.listPending())
 
+  // Stopping something Amber is still checking on. Answered with a fresh `status`,
+  // whose `waits` section is what the panel renders — so there is no optimistic local
+  // copy here either, for the reason the memory panel has none: she owns the list.
+  ipcMain.handle(
+    IPC.AMBER_WAIT_CANCEL,
+    (_e, id: string): boolean => amber.send({ type: 'wait_action', action: 'cancel', id }),
+  )
+
   // --- devices & extensions -------------------------------------------------
 
   ipcMain.handle(IPC.DEVICE_IDENTITY, () => ({

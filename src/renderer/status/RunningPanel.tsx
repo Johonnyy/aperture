@@ -1,4 +1,4 @@
-import { Loader2, Square } from 'lucide-react'
+import { Hourglass, Loader2, Square } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { PhaseRail } from '../bloom/build/PhaseRail'
@@ -17,17 +17,24 @@ import { Dot } from '../viz/primitives'
  * This is the section that stays expanded on every tab. A build takes minutes, and
  * the whole point of the rebuild is that wandering off to Settings should not mean
  * losing sight of it.
+ *
+ * Background watches belong here for the same reason and are the strongest case for it:
+ * a watch exists *because* the turn that started it already ended, so the chat card it
+ * came from has long since closed. Without a row here there is no surface at all
+ * between starting one and being told it finished, however long that takes.
  */
 export function RunningPanel(): React.JSX.Element {
   const timeline = useStore((s) => s.timeline)
   const runs = useStore((s) => s.bloomRuns)
+
+  const waits = useStore((s) => s.status?.waits ?? [])
 
   const calls = timeline.filter(
     (item) => item.kind === 'activity' && item.running,
   )
   const live = Object.entries(runs).filter(([, run]) => !run.done)
 
-  if (calls.length === 0 && live.length === 0) {
+  if (calls.length === 0 && live.length === 0 && waits.length === 0) {
     return <p className="text-meta text-muted">Nothing running.</p>
   }
 
@@ -45,6 +52,27 @@ export function RunningPanel(): React.JSX.Element {
             </div>
           ),
       )}
+
+      {waits.map((wait) => (
+        <div key={wait.id} className="flex items-center gap-1.5">
+          <Hourglass className="size-3 shrink-0 text-muted" />
+          <span className="min-w-0 flex-1 truncate text-meta text-ink/85" title={wait.check}>
+            {wait.what}
+          </span>
+          <span className="shrink-0 font-mono text-nano text-muted tabular-nums">
+            ×{wait.attempts}
+          </span>
+          <Elapsed since={Date.now() - wait.elapsed_s * 1000} />
+          <button
+            type="button"
+            title={`Stop waiting for ${wait.what}`}
+            onClick={() => void window.aperture.amber.cancelWait(wait.id)}
+            className="shrink-0 rounded-control p-0.5 text-muted transition hover:text-danger"
+          >
+            <Square className="size-2.5 fill-current" />
+          </button>
+        </div>
+      ))}
 
       {live.map(([runId, run]) => {
         const tools = run.events

@@ -246,6 +246,42 @@ export interface StatusFrame {
    * would ever see. Seed from here, then let `device_list` replace it wholesale.
    */
   devices?: DeviceRecord[]
+  /**
+   * What Amber is still checking on in the background — see `WaitRecord`.
+   *
+   * Empty when `features.waiting` is off, which is a *different* fact from empty with
+   * it on. The first is "she cannot wait on things here", the second is "nothing is
+   * pending"; collapsing them into one empty state says something untrue, exactly as
+   * it would for `devices`.
+   */
+  waits?: WaitRecord[]
+}
+
+/**
+ * One thing Amber is watching with no conversation attached.
+ *
+ * A watch is never *started* from here — it is what a `wait_for` becomes when the
+ * thing it is waiting on outlives the turn — so this is a read-and-stop surface, not
+ * a create one. `wait_action` is the stop.
+ *
+ * In-memory on Amber's side and deliberately so: a watch polls something over a live
+ * connection or a live peer, and a restart has already broken whatever it watched. Do
+ * not treat one as durable the way a `push` is.
+ */
+export interface WaitRecord {
+  /** Say it back on `wait_action`. Amber also speaks it, so it is short. */
+  id: string
+  /** The noun phrase Amber is waiting on: "TouchDesigner", "the Bloom build". */
+  what: string
+  /** What is being run each time — `Johnny's Desktop · process.status`. */
+  check: string
+  /** When it will be considered done, in words. */
+  until: string
+  state: 'running' | 'resolved' | 'timed_out' | 'cancelled'
+  attempts: number
+  elapsed_s: number
+  /** When it gives up. The answer arrives as a `push` either way. */
+  budget_s: number
 }
 
 /**
@@ -426,7 +462,17 @@ export interface ActivityFrame {
   type: 'activity'
   /** Correlates the `start` with its `end`. */
   id: string
-  phase: 'start' | 'end'
+  /**
+   * `progress` frames may arrive any number of times between the pair, carrying
+   * `note` and `attempt` and nothing else that changes. They patch a card that is
+   * already open — never treat one as an `end`, or a call still running is drawn as
+   * finished with no result.
+   *
+   * Only `wait_for` sends them today (Amber's `app/waiting.py`), where one tool call
+   * can legitimately run for a minute: the elapsed counter says a card is alive, and
+   * this says what it has actually seen.
+   */
+  phase: 'start' | 'progress' | 'end'
   /** The name the model called, prefixed by convention — see `ActivityOrigin`. */
   name: string
   origin: ActivityOrigin
@@ -440,6 +486,10 @@ export interface ActivityFrame {
   ok?: boolean
   /** Wall-clock duration in ms. `end` only. */
   ms?: number
+  /** One line of what the call has seen so far. `progress` only. */
+  note?: string
+  /** Which check this is, 1-based. `progress` only. */
+  attempt?: number
 }
 
 /**
@@ -890,6 +940,15 @@ export type ClientFrame =
    * re-asking for something just clicked trains people to approve without reading. The
    * confirmation lives on the conversational path, and locally on the target device.
    */
+  /**
+   * Stop a background watch. Answered with a fresh `status` frame, whose `waits`
+   * section is the listing this acts on — one shape rather than a second to learn.
+   *
+   * There is deliberately no "start a watch" here. A watch is what Amber's own
+   * `wait_for` becomes when a wait outlives its turn, so starting one from a panel
+   * would be a second way to create something the model is supposed to own.
+   */
+  | { type: 'wait_action'; action: 'cancel'; id: string }
   | {
       type: 'device_control_request'
       /** Ours to mint; echoed back on the response. */

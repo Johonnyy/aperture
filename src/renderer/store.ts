@@ -90,6 +90,16 @@ export interface Activity {
   running: boolean
   interrupted?: boolean
   /**
+   * The latest line a long call has reported about itself, and which check it was.
+   *
+   * Only `wait_for` sends these. It is the difference between a card that has been
+   * spinning for forty seconds and a card that has been spinning for forty seconds
+   * *because TouchDesigner still isn't in the process list* — the second is a status,
+   * the first is indistinguishable from a hang.
+   */
+  note?: string
+  attempt?: number
+  /**
    * A Bloom run this call started, once main has matched one to it.
    *
    * How a build kicked off by voice becomes watchable without leaving the chat: the
@@ -877,6 +887,18 @@ function reduceFrame(s: State, frame: ServerFrame): Partial<State> {
           trace: push(
             trace('info', `${frame.name}…`, JSON.stringify(frame.input ?? {})),
           ),
+        }
+      }
+      if (frame.phase === 'progress') {
+        // Patches the open card and nothing else. Falling through to the `end` branch
+        // would mark a call finished while it is still running, and with no result —
+        // the one way an additive frame can make this view lie rather than merely
+        // leave something out.
+        return {
+          timeline: patch(s.timeline, frame.id, {
+            note: frame.note,
+            attempt: frame.attempt,
+          }),
         }
       }
       return {

@@ -75,6 +75,7 @@ const CLIENT_FRAMES = [
   'eval_capture',
   'device_announce',
   'device_control_request',
+  'wait_action',
 ]
 if (new Set(CLIENT_FRAMES).size !== CLIENT_FRAMES.length) {
   fail('duplicate client frame type in the list')

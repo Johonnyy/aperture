@@ -6,6 +6,7 @@ import {
   Eraser,
   Globe,
   Hammer,
+  Hourglass,
   ListTodo,
   MessageCircleQuestion,
   Pencil,
@@ -123,6 +124,25 @@ const KNOWN: Record<string, ToolMeta> = {
     icon: MessageCircleQuestion,
     active: 'Waiting for your answer',
     done: 'Asked you something',
+  },
+  wait_for: {
+    icon: Hourglass,
+    // Deliberately names the thing rather than the mechanism. "Polling
+    // process.status" is what the card *does*; "Waiting for TouchDesigner" is what
+    // the person asked for, and the summary already carries the check.
+    active: 'Waiting for',
+    done: 'Waited for',
+    summary: (i) => str(i.what),
+  },
+  list_waits: {
+    icon: Hourglass,
+    active: 'Checking what she is waiting on',
+    done: 'Checked what she is waiting on',
+  },
+  cancel_wait: {
+    icon: Hourglass,
+    active: 'Stopping a watch',
+    done: 'Stopped a watch',
   },
 
   // --- Bloom, reached as a peer ---

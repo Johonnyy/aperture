@@ -28,6 +28,9 @@ export function ActivityCard({
   const [open, setOpen] = useState(false)
 
   const summary = activity.input ? meta.summary?.(activity.input) : undefined
+  // A note only means anything while the call is in flight; once it ends, the result
+  // is the truth and a stale "not up yet" beside a green tick reads as a contradiction.
+  const live = activity.running && Boolean(activity.note)
   const failed = activity.ok === false
   const hasDetail =
     Boolean(children) ||
@@ -57,10 +60,29 @@ export function ActivityCard({
           {activity.running ? meta.active : meta.done}
         </span>
 
-        {summary && (
-          <span className="min-w-0 flex-1 truncate text-body text-muted">{summary}</span>
+        {/*
+          While a long call is reporting, its latest line replaces the arguments on the
+          row. The arguments do not change and are one click away; the note is the only
+          thing on this card that is still moving, and it is what says "still coming up"
+          rather than "possibly hung".
+        */}
+        {live ? (
+          <span className="flex min-w-0 flex-1 items-center gap-2">
+            <span className="min-w-0 truncate text-body text-accent-hi">
+              {activity.note}
+            </span>
+            {activity.attempt !== undefined && (
+              <span className="shrink-0 font-mono text-nano text-muted tabular-nums">
+                #{activity.attempt}
+              </span>
+            )}
+          </span>
+        ) : (
+          summary && (
+            <span className="min-w-0 flex-1 truncate text-body text-muted">{summary}</span>
+          )
         )}
-        <span className={cn('flex-1', summary && 'hidden')} />
+        <span className={cn('flex-1', (summary || live) && 'hidden')} />
 
         {activity.readOnly && (
           // Worth showing: a card for a lookup should not read like a card for

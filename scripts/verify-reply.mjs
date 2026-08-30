@@ -17,6 +17,12 @@
  * the order they happened in. A `delta` continues a bubble only when that bubble is
  * the *last item in the timeline*.
  *
+ * **A progress frame read as an end.** `activity` used to have exactly two phases, so
+ * the reducer branched on `start` and treated everything else as the closing frame.
+ * `progress` (Amber's `wait_for`) arrives between them any number of times, and
+ * falling through would mark a call finished — spinner gone, no result, `ms` cleared —
+ * while it is still running. Additive on the wire, silently wrong in the view.
+ *
  * Run via `npm run verify:reply`.
  */
 
@@ -172,6 +178,27 @@ if (spoken[0]?.text !== 'Hi there. One moment.') {
 if (spoken[1]?.text !== 'Found it.') {
   fail(`sentences only: the post-tool sentence did not open its own bubble`)
 }
+
+// --- a progress frame patches the card without closing it -------------------
+
+drive('progress', [
+  { type: 'transcript', text: 'open touchdesigner' },
+  activityStart('c9', 'wait_for'),
+  { type: 'activity', phase: 'progress', id: 'c9', name: 'wait_for', origin: 'own', note: 'not found', attempt: 1 },
+  { type: 'activity', phase: 'progress', id: 'c9', name: 'wait_for', origin: 'own', note: 'still not found', attempt: 2 },
+])
+const card = timeline().find((i) => i.kind === 'activity' && i.id === 'c9')
+if (!card) {
+  fail('progress: the card vanished')
+} else {
+  if (!card.running) fail('progress: a progress frame closed the card')
+  if (card.note !== 'still not found') fail(`progress: note is "${card.note}"`)
+  if (card.attempt !== 2) fail(`progress: attempt is ${card.attempt}`)
+  if (card.ok !== undefined) fail('progress: a verdict was recorded before the end')
+}
+send(activityEnd('c9', 'wait_for'))
+const closed = timeline().find((i) => i.kind === 'activity' && i.id === 'c9')
+if (closed?.running) fail('progress: the end frame did not close the card')
 
 // --- the turn mark records everything she said ------------------------------
 

@@ -10,7 +10,7 @@
   "actions": [
     {
       "name": "process.launch",
-      "description": "Open one of the TouchDesigner projects configured on this machine. Names a project set up in Aperture's settings, not a file path. It takes several seconds to come up, so a command sent straight afterwards may find nothing listening yet.",
+      "description": "Open one of the TouchDesigner projects configured on this machine. Names a project set up in Aperture's settings, not a file path. It takes several seconds to come up, so anything sent straight afterwards may find nothing listening yet — wait_for it before the next step rather than trying and retrying.",
       "timeoutMs": 5000,
       "platforms": [
         "win32",
